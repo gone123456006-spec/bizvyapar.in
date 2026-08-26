@@ -218,6 +218,7 @@ export default function App() {
   const [status, setStatus] = useState('idle')
   const [message, setMessage] = useState('')
   const [submitted, setSubmitted] = useState(null)
+  const [subscriptionActive, setSubscriptionActive] = useState(false)
   const [showJoinForm, setShowJoinForm] = useState(false)
   const [joinStep, setJoinStep] = useState('details')
   const [showProfileMenu, setShowProfileMenu] = useState(false)
@@ -228,11 +229,75 @@ export default function App() {
   )
   const pendingOrderRef = useRef(null)
 
+  async function refreshSubscription() {
+    try {
+      const token = await getAccessToken()
+      if (!token) {
+        setSubscriptionActive(false)
+        return false
+      }
+
+      const res = await fetch(apiUrl('/api/profile/me'), {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) return false
+
+      const data = await res.json()
+      const latest = data.summary?.latestPayment || null
+      const paid =
+        data.profile?.status === 'paid' ||
+        Number(data.summary?.paymentCount || 0) > 0 ||
+        latest?.status === 'paid'
+
+      if (!paid) {
+        setSubscriptionActive(false)
+        return false
+      }
+
+      const paidName = data.profile?.name || name || user?.name || ''
+      const paidEmail = data.profile?.email || email || user?.email || ''
+      const paidPhone = data.profile?.phone || phone || ''
+
+      setSubscriptionActive(true)
+      setSubmitted({
+        name: paidName,
+        email: paidEmail,
+        phone: paidPhone,
+        webinarLink: latest?.webinarLink || null,
+        emailSent: true,
+        emailError: null,
+      })
+      if (paidName) setName(paidName)
+      if (paidEmail) setEmail(paidEmail)
+      if (paidPhone) setPhone(String(paidPhone).replace(/\D/g, '').slice(-10))
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  function openPaidLinksPopup() {
+    setJoinStep('success')
+    setStatus('success')
+    setMessage('Your subscription is active. Use the link below to join the webinar.')
+    setShowJoinForm(true)
+  }
+
+  useEffect(() => {
+    if (!user) {
+      setSubscriptionActive(false)
+      return undefined
+    }
+    void refreshSubscription()
+    return undefined
+  }, [user])
+
   useEffect(() => {
     if (!showJoinForm) return undefined
+    if (subscriptionActive) return undefined
     loadRazorpayScript().catch(() => {})
     return undefined
-  }, [showJoinForm])
+  }, [showJoinForm, subscriptionActive])
 
   useEffect(() => {
     function refreshWorkshop() {
@@ -295,26 +360,40 @@ export default function App() {
     if (!user) setShowProfileMenu(false)
   }, [user])
 
-  function openJoinForm(event) {
+  async function openJoinForm(event) {
     if (event) event.preventDefault()
+    setShowProfileMenu(false)
+    setMessage('')
+    pendingOrderRef.current = null
+
+    if (user) {
+      const paid = subscriptionActive || (await refreshSubscription())
+      if (paid) {
+        openPaidLinksPopup()
+        return
+      }
+    }
+
     setJoinStep('details')
     setStatus('idle')
-    setMessage('')
     setSubmitted(null)
-    pendingOrderRef.current = null
     setShowJoinForm(true)
   }
 
   function closeJoinForm() {
     setShowJoinForm(false)
-    setJoinStep('details')
-    setStatus('idle')
+    setJoinStep(subscriptionActive ? 'success' : 'details')
+    setStatus(subscriptionActive ? 'success' : 'idle')
     setMessage('')
     pendingOrderRef.current = null
   }
 
   async function handleDetailsNext(event) {
     event.preventDefault()
+    if (subscriptionActive) {
+      openPaidLinksPopup()
+      return
+    }
     setStatus('loading')
     setMessage('')
 
@@ -374,6 +453,10 @@ export default function App() {
 
   async function handlePayNow(event) {
     event.preventDefault()
+    if (subscriptionActive) {
+      openPaidLinksPopup()
+      return
+    }
     setStatus('loading')
     setMessage('')
 
@@ -489,6 +572,7 @@ export default function App() {
               }
 
               pendingOrderRef.current = null
+              setSubscriptionActive(true)
               setSubmitted({
                 name: payName,
                 email: payEmail,
@@ -658,16 +742,42 @@ export default function App() {
                       <span className="profile-menu-email">
                         {user.email || '—'}
                       </span>
+                      {subscriptionActive ? (
+                        <span className="profile-subscription-active">
+                          Subscription active
+                        </span>
+                      ) : (
+                        <span className="profile-subscription-inactive">
+                          No active subscription
+                        </span>
+                      )}
                     </div>
                   </div>
+
+                  {subscriptionActive ? (
+                    <button
+                      className="profile-menu-item"
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setShowProfileMenu(false)
+                        openPaidLinksPopup()
+                      }}
+                    >
+                      Open webinar link
+                    </button>
+                  ) : null}
 
                   <button
                     className="profile-menu-item"
                     type="button"
                     role="menuitem"
-                    onClick={() => setShowProfileMenu(false)}
+                    onClick={() => {
+                      setShowProfileMenu(false)
+                      void openJoinForm()
+                    }}
                   >
-                    View Profile
+                    {subscriptionActive ? 'View webinar access' : 'View Profile'}
                   </button>
                   <button
                     className="profile-menu-item"
@@ -1187,6 +1297,9 @@ export default function App() {
               {joinStep === 'success' && submitted ? (
                 <div className="review-panel" role="status">
                   <h2 id="join-form-title">You’re in</h2>
+                  {subscriptionActive ? (
+                    <p className="subscription-active-banner">Subscription active</p>
+                  ) : null}
                   <p className="join-sub">
                     {message ||
                       'Your payment is done. Now you are in for the Webinar.'}
@@ -1194,15 +1307,15 @@ export default function App() {
 
                   {submitted.emailSent ? (
                     <p className="join-sub">
-                      We sent the webinar link to <strong>{submitted.email}</strong>.
+                      Webinar details are linked to{' '}
+                      <strong>{submitted.email}</strong>.
                     </p>
-                  ) : (
+                  ) : submitted.emailError ? (
                     <p className="form-error" role="alert">
                       Email not sent to <strong>{submitted.email}</strong>
                       {submitted.emailError ? `: ${submitted.emailError}` : '.'}
-                      {' '}Please check Gmail SMTP settings in backend/.env.
                     </p>
-                  )}
+                  ) : null}
 
                   {submitted.webinarLink ? (
                     <a
@@ -1213,7 +1326,12 @@ export default function App() {
                     >
                       Open webinar link
                     </a>
-                  ) : null}
+                  ) : (
+                    <p className="join-sub">
+                      Your seat is confirmed. Webinar link will appear here once
+                      available.
+                    </p>
+                  )}
                 </div>
               ) : joinStep === 'payment' ? (
                 <>
