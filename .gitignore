@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build / cache
+dist/
+dist-ssr/
+build/
+.cache/
+.vite/
+.turbo/
+coverage/
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Environment & secrets (never commit real keys)
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.p12
+*.key
+*credentials*.json
+*serviceAccount*.json
+*firebase-adminsdk*.json
+secrets/
+.secrets/
+
+# Local overrides
+*.local
+
+# App runtime data
+backend/data/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Optional local tooling
+.vercel
+.netlify

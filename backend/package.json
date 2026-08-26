@@ -1,0 +1,19 @@
+{
+  "name": "easy-vyapar-backend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "firebase-admin": "^14.3.0",
+    "jose": "^6.2.10",
+    "nodemailer": "^9.0.5",
+    "razorpay": "^2.9.8"
+  }
+}

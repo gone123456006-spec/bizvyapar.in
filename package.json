@@ -1,0 +1,20 @@
+{
+  "name": "easy-vyapar",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c blue,green \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "dev:backend": "npm run dev --workspace=backend",
+    "build": "npm run build --workspace=frontend",
+    "start": "npm run start --workspace=backend",
+    "lint": "npm run lint --workspace=frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
