@@ -429,32 +429,63 @@ export default function App() {
           color: '#006b3c',
         },
         handler: (response) => {
-          setStatus('loading')
-          void getAccessToken()
-            .then((token) => {
+          void (async () => {
+            setStatus('loading')
+            setMessage('Payment received. Confirming your seat…')
+
+            const paymentId = response?.razorpay_payment_id || ''
+            const controller = new AbortController()
+            const timer = window.setTimeout(() => controller.abort(), 45000)
+
+            try {
+              const token = await getAccessToken()
               if (!token) {
                 throw new Error('Please sign in with Google to confirm payment.')
               }
-              return fetch(apiUrl('/api/payments/verify'), {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({
-                  name: payName,
-                  email: payEmail,
-                  phone: payPhone,
-                  razorpay_order_id: response.razorpay_order_id,
-                  razorpay_payment_id: response.razorpay_payment_id,
-                  razorpay_signature: response.razorpay_signature,
-                }),
-              })
-            })
-            .then(async (verifyRes) => {
-              const verifyData = await verifyRes.json()
+
+              let verifyRes
+              try {
+                verifyRes = await fetch(apiUrl('/api/payments/verify'), {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                  },
+                  signal: controller.signal,
+                  body: JSON.stringify({
+                    name: payName,
+                    email: payEmail,
+                    phone: payPhone,
+                    razorpay_order_id: response.razorpay_order_id,
+                    razorpay_payment_id: response.razorpay_payment_id,
+                    razorpay_signature: response.razorpay_signature,
+                  }),
+                })
+              } catch (networkError) {
+                if (networkError?.name === 'AbortError') {
+                  throw new Error(
+                    'Confirmation timed out. If ₹1 was deducted, your seat is likely booked — check Gmail or contact support with payment ID ' +
+                      paymentId,
+                  )
+                }
+                throw new Error(
+                  'Could not confirm payment with server. If ₹1 was deducted, contact support with payment ID ' +
+                    paymentId,
+                )
+              }
+
+              let verifyData = {}
+              try {
+                verifyData = await verifyRes.json()
+              } catch {
+                verifyData = {}
+              }
+
               if (!verifyRes.ok) {
-                throw new Error(verifyData.message || 'Payment verification failed.')
+                throw new Error(
+                  verifyData.message ||
+                    `Payment verification failed (${verifyRes.status}). Payment ID: ${paymentId}`,
+                )
               }
 
               pendingOrderRef.current = null
@@ -472,11 +503,13 @@ export default function App() {
                 verifyData.message ||
                   'Your payment is done. Now you are in for the Webinar.',
               )
-            })
-            .catch((error) => {
+            } catch (error) {
               setStatus('error')
               setMessage(error.message || 'Payment verification failed.')
-            })
+            } finally {
+              window.clearTimeout(timer)
+            }
+          })()
         },
         modal: {
           ondismiss: () => {
@@ -1245,7 +1278,9 @@ export default function App() {
                     disabled={status === 'loading' || signingIn}
                   >
                     {status === 'loading' || signingIn
-                      ? 'Please wait…'
+                      ? message?.includes('Confirming')
+                        ? 'Confirming payment…'
+                        : 'Please wait…'
                       : user
                         ? 'Pay Now · Join'
                         : 'Sign in & Pay Now'}

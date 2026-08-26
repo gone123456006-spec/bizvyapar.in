@@ -123,19 +123,28 @@ async function finalizePaidSeat({
   }
 
   if (sendEmail && isEmailConfigured()) {
-    try {
-      await sendWebinarPaymentEmail({
-        to: lead.email,
-        name: lead.name,
-        paymentId,
-        webinarLink,
-        amountLabel: '₹1',
+    // Never block payment confirmation on slow SMTP (Render free can hang here).
+    const emailJob = sendWebinarPaymentEmail({
+      to: lead.email,
+      name: lead.name,
+      paymentId,
+      webinarLink,
+      amountLabel: '₹1',
+    })
+      .then(() => {
+        emailSent = true
       })
-      emailSent = true
-    } catch (error) {
-      console.error('Failed to send webinar email:', error)
-      emailError = error.message || 'Could not send email.'
-    }
+      .catch((error) => {
+        console.error('Failed to send webinar email:', error)
+        emailError = error.message || 'Could not send email.'
+      })
+
+    await Promise.race([
+      emailJob,
+      new Promise((resolve) => {
+        setTimeout(resolve, 4000)
+      }),
+    ])
   } else if (sendEmail) {
     emailError = 'Email is not configured on the server.'
   }
