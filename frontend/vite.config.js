@@ -1,10 +1,16 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
-// https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
+    cssCodeSplit: true,
+    assetsInlineLimit: 4096,
+  },
   server: {
+    host: true, // expose on LAN for phones / other devices
     port: 5173,
     proxy: {
       '/api': {
@@ -12,5 +18,9 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+  },
+  preview: {
+    host: true,
+    port: 4173,
   },
 })

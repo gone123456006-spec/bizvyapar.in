@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { useAuth } from './context/AuthContext.jsx'
+import { useAuth, getAccessToken } from './context/AuthContext.jsx'
+import { apiUrl } from './lib/api.js'
 import './App.css'
 
 function CheckIcon({ className = 'review-check' }) {
@@ -39,6 +40,50 @@ function formatWorkshopDay(date) {
 function formatWorkshopLabel(date) {
   return `${formatWorkshopDay(date)} · 5:00 PM`
 }
+
+const FAQ_ITEMS = [
+  {
+    q: 'What is TReDS?',
+    a: 'TReDS (Trade Receivables Discounting System) is a digital platform that helps MSMEs get money against eligible unpaid invoices. Instead of waiting for the buyer to pay, the invoice can be discounted through the platform, allowing the MSME to receive funds earlier.',
+  },
+  {
+    q: 'What is Invoice Discounting?',
+    a: 'Invoice discounting means getting funds against an unpaid invoice before its due date. A financial institution provides the funds after applying a discount/charge, while the invoice is settled when the buyer makes the payment.',
+  },
+  {
+    q: 'What is Invoice Financing?',
+    a: 'Invoice financing is a broader term for using outstanding invoices to access working capital. It can help a business get funds tied up in unpaid invoices instead of waiting for the full payment cycle.',
+  },
+  {
+    q: 'How does TReDS work?',
+    a: 'The basic process is simple: Invoice Raised → Buyer Accepts Invoice → Invoice Uploaded on TReDS → Financing Offer → Invoice Discounted → Funds Received. The exact process and timelines can vary depending on the transaction and participating institutions.',
+  },
+  {
+    q: 'Who can use TReDS?',
+    a: 'TReDS is primarily designed to help Micro, Small and Medium Enterprises (MSMEs) finance their eligible trade receivables. Eligibility depends on the platform, transaction, buyer and applicable requirements.',
+  },
+  {
+    q: 'Does the buyer need to approve the invoice?',
+    a: 'Yes, generally the buyer must accept or confirm the invoice before it can be financed through TReDS. This helps establish that the receivable is genuine and payable by the buyer.',
+  },
+  {
+    q: 'How quickly can I receive the money?',
+    a: 'Once an eligible invoice is accepted and successfully financed, funds can be received much earlier than the original invoice due date. The actual timing depends on the platform, financier, documentation and transaction process.',
+  },
+  {
+    q: 'Is Invoice Discounting a loan?',
+    a: "Not necessarily. Invoice discounting is generally based on an existing trade receivable rather than simply giving funds against the business's future income. The exact legal and financial structure depends on the arrangement and financing institution.",
+  },
+  {
+    q: 'How much does Invoice Financing cost?',
+    a: 'The cost can vary based on factors such as the buyer, invoice, tenure, transaction risk and financing institution. There may be a discounting charge, financing cost or other applicable fees. The actual commercial terms should always be checked before accepting an offer.',
+  },
+  {
+    q: 'Why should a business consider TReDS or Invoice Financing?',
+    a: 'It can help businesses unlock money stuck in unpaid invoices, improve working capital and maintain smoother cash flow. Instead of waiting for the entire payment cycle, an eligible business may be able to access funds earlier against its receivables.',
+  },
+]
+
 
 function getCountdownParts(target, now = new Date()) {
   const totalMs = Math.max(0, target.getTime() - now.getTime())
@@ -82,9 +127,17 @@ function loadRazorpayScript() {
 }
 
 async function createPaymentOrder(lead) {
-  const orderRes = await fetch('/api/payments/create-order', {
+  const token = await getAccessToken()
+  if (!token) {
+    throw new Error('Please sign in with Google before payment.')
+  }
+
+  const orderRes = await fetch(apiUrl('/api/payments/create-order'), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
     body: JSON.stringify(lead),
   })
   const orderData = await orderRes.json()
@@ -121,6 +174,7 @@ export default function App() {
   const [showJoinForm, setShowJoinForm] = useState(false)
   const [joinStep, setJoinStep] = useState('details')
   const [showProfileMenu, setShowProfileMenu] = useState(false)
+  const [showAllFaqs, setShowAllFaqs] = useState(false)
   const [nextWorkshop, setNextWorkshop] = useState(() => getNextWorkshopSunday())
   const [countdown, setCountdown] = useState(() =>
     getCountdownParts(getNextWorkshopSunday()),
@@ -229,8 +283,9 @@ export default function App() {
     pendingOrderRef.current = null
   }
 
-  function handleDetailsNext(event) {
+  async function handleDetailsNext(event) {
     event.preventDefault()
+    setStatus('loading')
     setMessage('')
 
     if (!name.trim()) {
@@ -258,9 +313,33 @@ export default function App() {
       return
     }
 
-    setStatus('idle')
-    setJoinStep('payment')
-    pendingOrderRef.current = createPaymentOrder({ name, email, phone })
+    try {
+      let activeUser = user
+      if (!activeUser) {
+        setMessage('Please sign in with Google to continue…')
+        activeUser = await signInWithGoogle()
+        if (!activeUser) {
+          throw new Error('Google sign-in is required before payment.')
+        }
+      }
+
+      const lockedEmail = (activeUser.email || email).trim()
+      const lockedName = (name || activeUser.name || '').trim()
+      setEmail(lockedEmail)
+      if (!name.trim() && activeUser.name) setName(activeUser.name)
+
+      setStatus('idle')
+      setMessage('')
+      setJoinStep('payment')
+      pendingOrderRef.current = createPaymentOrder({
+        name: lockedName,
+        email: lockedEmail,
+        phone,
+      })
+    } catch (error) {
+      setStatus('error')
+      setMessage(error.message || 'Please sign in with Google first.')
+    }
   }
 
   async function handlePayNow(event) {
@@ -305,7 +384,7 @@ export default function App() {
         key: keyId,
         amount: orderData.amount,
         currency: orderData.currency || 'INR',
-        name: 'Easy Vyapar',
+        name: 'BizVyapar',
         description: 'Live 30-Min Workshop',
         order_id: orderData.orderId,
         prefill: {
@@ -321,18 +400,27 @@ export default function App() {
         },
         handler: (response) => {
           setStatus('loading')
-          fetch('/api/payments/verify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: payName,
-              email: payEmail,
-              phone: payPhone,
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature,
-            }),
-          })
+          void getAccessToken()
+            .then((token) => {
+              if (!token) {
+                throw new Error('Please sign in with Google to confirm payment.')
+              }
+              return fetch(apiUrl('/api/payments/verify'), {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                  name: payName,
+                  email: payEmail,
+                  phone: payPhone,
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature,
+                }),
+              })
+            })
             .then(async (verifyRes) => {
               const verifyData = await verifyRes.json()
               if (!verifyRes.ok) {
@@ -424,8 +512,11 @@ export default function App() {
 
         <header className="nav">
           <a className="nav-brand" href="#top">
-            <span className="nav-logo" aria-hidden="true" />
-            Easy Vyapar
+            <img
+              className="brand-logo brand-logo--nav"
+              src="/images/logo.png?v=2"
+              alt="BizVyapar"
+            />
           </a>
 
           <div className="nav-actions">
@@ -714,6 +805,16 @@ export default function App() {
                 </li>
               </ul>
             </div>
+
+            <div className="speaker-actions">
+              <button
+                className="hero-cta speaker-cta"
+                type="button"
+                onClick={openJoinForm}
+              >
+                Join now &gt;
+              </button>
+            </div>
           </div>
         </section>
 
@@ -733,21 +834,28 @@ export default function App() {
                 Reserve Your Place — <strong>₹1</strong>
               </p>
 
-              <div className="spot-actions">
+              <div className="spot-actions register-join-actions register-join-actions--desktop">
                 <button
                   className="spot-cta"
                   type="button"
                   onClick={openJoinForm}
                 >
-                  JOIN THE WAITLIST →
+                  Join now &gt;
                 </button>
-                <p className="spot-pill">
+                <p className="spot-pill register-schedule">
                   <span>
                     Scheduled on <strong>{formatWorkshopDay(nextWorkshop)}</strong>{' '}
                     at <strong>5:00 PM</strong>
                   </span>
                 </p>
               </div>
+
+              <p className="spot-pill register-schedule register-schedule--mobile">
+                <span>
+                  Scheduled on <strong>{formatWorkshopDay(nextWorkshop)}</strong>{' '}
+                  at <strong>5:00 PM</strong>
+                </span>
+              </p>
 
               <p className="register-flow">
                 Payment → Confirmation → Added to Waiting List →{' '}
@@ -820,14 +928,172 @@ export default function App() {
                   Locked Video
                 </p>
               </div>
+              <p className="register-price-under-video">
+                Reserve Your Place — <strong>₹1</strong>
+              </p>
+            </div>
+
+            <div className="spot-actions register-join-actions register-join-actions--mobile">
+              <button
+                className="spot-cta"
+                type="button"
+                onClick={openJoinForm}
+              >
+                Join now &gt;
+              </button>
             </div>
           </div>
+        </section>
+
+        <section className="section treds-section" id="treds" aria-labelledby="treds-title">
+          <div className="treds-banner">
+            <header className="treds-header">
+              <h2 id="treds-title">Invoice to Bank Balance via TReDS</h2>
+              <p className="treds-subtitle">
+                From unpaid invoices to faster working capital.
+              </p>
+            </header>
+
+            <div className="treds-flow">
+              <article className="treds-card treds-card--input" aria-label="Input: Invoice">
+                <span className="treds-badge treds-badge--input">INPUT</span>
+                <div className="treds-card-title">
+                  <h3>Invoice</h3>
+                </div>
+                <ul className="treds-list">
+                  <li>Goods/Services Delivered</li>
+                  <li>Invoice Raised</li>
+                  <li>Buyer Accepts</li>
+                  <li>Uploaded on TReDS</li>
+                </ul>
+              </article>
+
+              <div className="treds-hub" aria-hidden="true">
+                <div className="treds-hub-line treds-hub-line--left">
+                  <span className="treds-hub-dash" />
+                  <svg className="treds-hub-arrow" viewBox="0 0 24 24" focusable="false">
+                    <path d="M5.5 4.2 Q10.2 12 5.5 19.8 L19.2 12 Z" />
+                  </svg>
+                </div>
+                <div className="treds-hub-core">
+                  <p className="treds-hub-label">TReDS</p>
+                  <span className="treds-hub-circle">
+                    <svg viewBox="0 0 24 24" fill="none">
+                      <path
+                        d="M4 19h16M6 19V9l6-4 6 4v10"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinejoin="round"
+                      />
+                      <path d="M10 19v-5h4v5" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+                    </svg>
+                  </span>
+                  <p className="treds-hub-strong">Transparent • Secure • Fast</p>
+                  <p className="treds-hub-meta">Technology | Trust | Liquidity</p>
+                </div>
+                <div className="treds-hub-line treds-hub-line--right">
+                  <span className="treds-hub-dash" />
+                  <svg className="treds-hub-arrow" viewBox="0 0 24 24" focusable="false">
+                    <path d="M5.5 4.2 Q10.2 12 5.5 19.8 L19.2 12 Z" />
+                  </svg>
+                </div>
+              </div>
+
+              <article className="treds-card treds-card--output" aria-label="Output: Bank Balance">
+                <span className="treds-badge treds-badge--output">OUTPUT</span>
+                <div className="treds-card-title">
+                  <h3>Bank Balance</h3>
+                </div>
+                <ul className="treds-list treds-list--output">
+                  <li>Invoice Discounted</li>
+                  <li>Funds Transferred</li>
+                  <li>Instant Liquidity</li>
+                  <li>Business Keeps Moving</li>
+                </ul>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section className="section treds-summary-section" aria-labelledby="webinar-objectives-title">
+          <h2 id="webinar-objectives-title" className="treds-summary-title">
+            Webinar Objectives
+          </h2>
+          <blockquote className="treds-quote">
+            <span className="treds-quote-mark treds-quote-mark--open" aria-hidden="true">
+              “
+            </span>
+            <p className="treds-lead">
+              <span className="treds-lead-line">
+                Understand TReDS &amp; Invoice Discounting,
+              </span>
+              <span className="treds-lead-line">
+                learn how to unlock cash against invoices,
+              </span>
+              <span className="treds-lead-line">
+                understand eligibility and the process, improve cash flow
+              </span>
+              <span className="treds-lead-line">
+                and working capital, and see a practical real-world example.
+              </span>
+            </p>
+            <p className="treds-lead treds-lead--mobile">
+              Understand TReDS &amp; Invoice Discounting, learn how to unlock
+              cash against invoices, understand eligibility and the process,
+              improve cash flow and working capital, and see a practical
+              real-world example.
+            </p>
+            <span className="treds-quote-mark treds-quote-mark--close" aria-hidden="true">
+              ”
+            </span>
+          </blockquote>
+
+          <button
+            className="hero-cta treds-summary-cta"
+            type="button"
+            onClick={openJoinForm}
+          >
+            Join now &gt;
+          </button>
+        </section>
+
+        <section className="section faq-section" id="faq" aria-labelledby="faq-title">
+          <h2 id="faq-title" className="faq-title">
+            <span className="faq-title-main">FAQs — TReDS</span>
+            <span className="faq-title-sep">, </span>
+            <span className="faq-title-sub">
+              Invoice Discounting &amp; Invoice Financing
+            </span>
+          </h2>
+
+          <div className="faq-list">
+            {(showAllFaqs ? FAQ_ITEMS : FAQ_ITEMS.slice(0, 5)).map((item) => (
+              <article className="faq-item" key={item.q}>
+                <h3 className="faq-question">{item.q}</h3>
+                <p className="faq-answer">{item.a}</p>
+              </article>
+            ))}
+          </div>
+
+          <button
+            className="faq-more"
+            type="button"
+            onClick={() => setShowAllFaqs((open) => !open)}
+          >
+            {showAllFaqs ? 'Show less' : 'more...'}
+          </button>
         </section>
       </main>
 
       <footer className="footer">
         <div className="footer-inner">
-          <span className="footer-brand">Easy Vyapar</span>
+          <a className="footer-brand" href="#top">
+            <img
+              className="brand-logo brand-logo--footer"
+              src="/images/logo.png?v=2"
+              alt="BizVyapar"
+            />
+          </a>
           <p>Waitlist webinar for Indian small businesses.</p>
         </div>
       </footer>
@@ -854,6 +1120,11 @@ export default function App() {
               ×
             </button>
 
+            <img
+              className="brand-logo brand-logo--modal"
+              src="/images/logo.png?v=2"
+              alt="BizVyapar"
+            />
             <h2 id="popup-title">Save Your Spot For Sunday.</h2>
             <p>
               Join the waiting list first. You’ll receive confirmation after
@@ -866,7 +1137,7 @@ export default function App() {
                 type="button"
                 onClick={openJoinForm}
               >
-                JOIN THE WAITLIST →
+                Join now &gt;
               </button>
               <p className="spot-pill">
                 <span>
@@ -986,7 +1257,7 @@ export default function App() {
                   )}
 
                   <p className="payment-recipient">
-                    Power by <strong>RECUIT PLUS PVT LTD.</strong>
+                    Payment Partner <strong>RECUIT PLUS PVT LTD.</strong>
                   </p>
 
                   <button
@@ -1092,7 +1363,7 @@ export default function App() {
                         onChange={(e) => setConsent(e.target.checked)}
                       />
                       <span>
-                        I authorise Easy Vyapar &amp; its representatives to
+                        I authorise BizVyapar &amp; its representatives to
                         contact me with updates and notifications via
                         Email/SMS/WhatsApp/Call and other channels, even if my
                         number is registered on DND/NDNC.

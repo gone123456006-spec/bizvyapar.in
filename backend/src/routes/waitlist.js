@@ -1,65 +1,65 @@
 import { Router } from 'express'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const dataDir = path.resolve(__dirname, '../../data')
-const dataFile = path.join(dataDir, 'waitlist.json')
+import { optionalAuth } from '../db/authMiddleware.js'
+import { upsertRegistration } from '../db/userDb.js'
 
 export const waitlistRouter = Router()
 
-async function loadEntries() {
+waitlistRouter.post('/', optionalAuth, async (req, res, next) => {
   try {
-    const raw = await readFile(dataFile, 'utf8')
-    return JSON.parse(raw)
-  } catch {
-    return []
-  }
-}
+    const name = String(req.body?.name || '').trim()
+    const email = String(req.body?.email || '').trim().toLowerCase()
+    const phone = String(req.body?.phone || '').trim()
 
-async function saveEntries(entries) {
-  await mkdir(dataDir, { recursive: true })
-  await writeFile(dataFile, JSON.stringify(entries, null, 2), 'utf8')
-}
+    if (!name || name.length < 2) {
+      return res.status(400).json({ message: 'Please enter your full name.' })
+    }
 
-waitlistRouter.post('/', async (req, res) => {
-  const name = String(req.body?.name || '').trim()
-  const email = String(req.body?.email || '').trim().toLowerCase()
-  const phone = String(req.body?.phone || '').trim()
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ message: 'Please enter a valid email.' })
+    }
 
-  if (!name || name.length < 2) {
-    return res.status(400).json({ message: 'Please enter your full name.' })
-  }
+    if (phone && !/^[0-9+\-\s]{7,15}$/.test(phone)) {
+      return res.status(400).json({ message: 'Please enter a valid phone number.' })
+    }
 
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return res.status(400).json({ message: 'Please enter a valid email.' })
-  }
+    // Isolation: if signed in, force registration into that user's DB only.
+    // If guest, create/use email-scoped private database.
+    if (req.auth?.email && req.auth.email.toLowerCase() !== email) {
+      return res.status(403).json({
+        message: 'You can only register with your signed-in email.',
+      })
+    }
 
-  if (phone && !/^[0-9+\-\s]{7,15}$/.test(phone)) {
-    return res.status(400).json({ message: 'Please enter a valid phone number.' })
-  }
+    const result = await upsertRegistration(
+      {
+        uid: req.auth?.uid || null,
+        email,
+        name,
+        phone: phone || null,
+        provider: req.auth?.provider || 'waitlist',
+        emailVerified: req.auth?.emailVerified || false,
+      },
+      {
+        name,
+        email,
+        phone: phone || null,
+        status: 'joined',
+      },
+    )
 
-  const entries = await loadEntries()
-  const existing = entries.find((entry) => entry.email === email)
+    if (result.alreadyJoined) {
+      return res.status(200).json({
+        message: 'You are already on the waitlist. We will email the webinar link.',
+        alreadyJoined: true,
+        tenantId: result.tenantId,
+      })
+    }
 
-  if (existing) {
-    return res.status(200).json({
-      message: 'You are already on the waitlist. We will email the webinar link.',
-      alreadyJoined: true,
+    return res.status(201).json({
+      message: 'You are on the waitlist. Check your email for the webinar link.',
+      tenantId: result.tenantId,
     })
+  } catch (error) {
+    next(error)
   }
-
-  entries.push({
-    name,
-    email,
-    phone: phone || null,
-    joinedAt: new Date().toISOString(),
-  })
-
-  await saveEntries(entries)
-
-  return res.status(201).json({
-    message: 'You are on the waitlist. Check your email for the webinar link.',
-  })
 })

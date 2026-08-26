@@ -9,6 +9,7 @@ try {
     name: 'Shyam',
     paymentId: 'demo_test',
     webinarLink: process.env.WEBINAR_LINK,
+    amountLabel: '₹1',
   })
   console.log('SENT', JSON.stringify(result || { ok: true }, null, 2))
 } catch (error) {

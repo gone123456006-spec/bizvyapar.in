@@ -14,6 +14,7 @@ import {
   signOut as firebaseSignOut,
 } from 'firebase/auth'
 import { auth, isFirebaseConfigured } from '../lib/firebase.js'
+import { apiUrl } from '../lib/api.js'
 
 const AuthContext = createContext(null)
 const googleProvider = new GoogleAuthProvider()
@@ -30,13 +31,17 @@ function mapFirebaseUser(firebaseUser) {
 }
 
 function syncUserWithBackend(idToken) {
-  // Fire-and-forget network call — never blocks the UI thread path.
-  return fetch('/api/auth/google', {
+  return fetch(apiUrl('/api/auth/google'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ idToken }),
     keepalive: true,
   }).catch(() => null)
+}
+
+export async function getAccessToken() {
+  if (!auth?.currentUser) return null
+  return auth.currentUser.getIdToken(false)
 }
 
 export function AuthProvider({ children }) {
@@ -165,6 +170,7 @@ export function AuthProvider({ children }) {
       isConfigured: isFirebaseConfigured(),
       signInWithGoogle,
       signOut,
+      getAccessToken,
     }),
     [user, loading, signingIn, error],
   )

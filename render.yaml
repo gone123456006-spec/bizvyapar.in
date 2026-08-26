@@ -1,0 +1,84 @@
+# Render Blueprint — BizVyapar API + keep-alive cron + optional Postgres
+# Docs: https://render.com/docs/blueprint-spec
+
+databases:
+  - name: bizvyapar-db
+    plan: free
+    region: singapore
+    databaseName: bizvyapar
+    user: bizvyapar
+
+services:
+  - type: web
+    name: bizvyapar-api
+    runtime: node
+    rootDir: backend
+    plan: free
+    region: singapore
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: WORKSHOP_AMOUNT_PAISE
+        value: "100"
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_SENDER_NAME
+        value: BizVyapar
+      - key: REMINDERS_ENABLED
+        value: "true"
+      - key: PGSSL
+        value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: bizvyapar-db
+          property: connectionString
+      - key: CORS_ORIGIN
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: WEBINAR_LINK
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+
+  # External 1-minute ping so the free web service stays warm.
+  - type: cron
+    name: bizvyapar-keepalive
+    runtime: node
+    rootDir: backend
+    region: singapore
+    plan: starter
+    schedule: "* * * * *"
+    buildCommand: npm install
+    startCommand: node scripts/keepalive-once.js
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: KEEPALIVE_URL
+        sync: false

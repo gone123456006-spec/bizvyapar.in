@@ -1,7 +1,11 @@
 {
-  "name": "easy-vyapar",
+  "name": "bizvyapar",
   "private": true,
   "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "workspaces": [
     "frontend",
     "backend"
@@ -11,8 +15,10 @@
     "dev:frontend": "npm run dev --workspace=frontend",
     "dev:backend": "npm run dev --workspace=backend",
     "build": "npm run build --workspace=frontend",
+    "build:production": "npm run build --workspace=frontend",
     "start": "npm run start --workspace=backend",
-    "lint": "npm run lint --workspace=frontend"
+    "lint": "npm run lint --workspace=frontend",
+    "preview": "npm run preview --workspace=frontend"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

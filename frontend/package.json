@@ -1,13 +1,14 @@
 {
-  "name": "easy-vyapar-frontend",
+  "name": "bizvyapar-frontend",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host",
+    "dev:local": "vite",
     "build": "vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview --host"
   },
   "dependencies": {
     "firebase": "^12.18.0",

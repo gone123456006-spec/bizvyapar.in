@@ -1,14 +1,13 @@
 import { Router } from 'express'
 import crypto from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import Razorpay from 'razorpay'
-import { getEmailConfigStatus, isEmailConfigured, sendWebinarPaymentEmail } from '../email.js'
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const dataDir = path.resolve(__dirname, '../../data')
-const dataFile = path.join(dataDir, 'waitlist.json')
+import { requireAuth } from '../db/authMiddleware.js'
+import { findPaymentAnywhere, recordPayment, touchLogin } from '../db/userDb.js'
+import {
+  getEmailConfigStatus,
+  isEmailConfigured,
+  sendWebinarPaymentEmail,
+} from '../email.js'
 
 export const paymentsRouter = Router()
 
@@ -30,22 +29,9 @@ function getRazorpay() {
 
   return {
     keyId,
+    keySecret,
     client: new Razorpay({ key_id: keyId, key_secret: keySecret }),
   }
-}
-
-async function loadEntries() {
-  try {
-    const raw = await readFile(dataFile, 'utf8')
-    return JSON.parse(raw)
-  } catch {
-    return []
-  }
-}
-
-async function saveEntries(entries) {
-  await mkdir(dataDir, { recursive: true })
-  await writeFile(dataFile, JSON.stringify(entries, null, 2), 'utf8')
 }
 
 function validateLead(body) {
@@ -69,12 +55,118 @@ function validateLead(body) {
   return { name, email, phone: digits }
 }
 
-paymentsRouter.post('/create-order', async (req, res, next) => {
+function assertAuthEmail(auth, email) {
+  const authEmail = String(auth?.email || '').trim().toLowerCase()
+  if (!authEmail) {
+    const error = new Error('Google account email is required for payment.')
+    error.status = 401
+    throw error
+  }
+  if (authEmail !== email) {
+    const error = new Error('Payment email must match your signed-in Google account.')
+    error.status = 403
+    throw error
+  }
+}
+
+async function finalizePaidSeat({
+  auth,
+  lead,
+  orderId,
+  paymentId,
+  sendEmail = true,
+}) {
+  const webinarLink = getWebinarLink()
+
+  // Always bind to Firebase uid tenant (no guest split DB).
+  await touchLogin({
+    uid: auth.uid,
+    email: auth.email,
+    name: auth.name || lead.name,
+    picture: auth.picture || null,
+    provider: auth.provider || 'google.com',
+    emailVerified: auth.emailVerified,
+    phone: lead.phone,
+  })
+
+  const saved = await recordPayment(
+    {
+      uid: auth.uid,
+      email: auth.email,
+      name: lead.name || auth.name,
+      phone: lead.phone,
+      provider: auth.provider || 'google.com',
+      emailVerified: auth.emailVerified,
+    },
+    {
+      name: lead.name,
+      email: lead.email,
+      phone: lead.phone,
+      paymentId,
+      orderId,
+      amount: WORKSHOP_AMOUNT_PAISE,
+      webinarLink: webinarLink || null,
+    },
+  )
+
+  let emailSent = false
+  let emailError = null
+
+  if (saved.alreadyRecorded) {
+    return {
+      saved,
+      webinarLink: saved.payment?.webinarLink || webinarLink || null,
+      emailSent: false,
+      emailError: null,
+      alreadyRecorded: true,
+    }
+  }
+
+  if (sendEmail && isEmailConfigured()) {
+    try {
+      await sendWebinarPaymentEmail({
+        to: lead.email,
+        name: lead.name,
+        paymentId,
+        webinarLink,
+        amountLabel: '₹1',
+      })
+      emailSent = true
+    } catch (error) {
+      console.error('Failed to send webinar email:', error)
+      emailError = error.message || 'Could not send email.'
+    }
+  } else if (sendEmail) {
+    emailError = 'Email is not configured on the server.'
+  }
+
+  return {
+    saved,
+    webinarLink: webinarLink || null,
+    emailSent,
+    emailError,
+    alreadyRecorded: false,
+  }
+}
+
+paymentsRouter.post('/create-order', requireAuth, async (req, res, next) => {
   try {
     const lead = validateLead(req.body)
     if (lead.error) {
       return res.status(400).json({ message: lead.error })
     }
+
+    assertAuthEmail(req.auth, lead.email)
+
+    const login = await touchLogin({
+      uid: req.auth.uid,
+      email: req.auth.email,
+      name: req.auth.name || lead.name,
+      picture: req.auth.picture,
+      provider: req.auth.provider,
+      emailVerified: req.auth.emailVerified,
+      phone: lead.phone,
+    })
 
     const { keyId, client } = getRazorpay()
     const receipt = `ev_${Date.now().toString(36)}`
@@ -87,6 +179,8 @@ paymentsRouter.post('/create-order', async (req, res, next) => {
         name: lead.name,
         email: lead.email,
         phone: lead.phone,
+        uid: req.auth.uid,
+        tenantId: login.tenantId,
         product: 'Live 30-Min Workshop',
       },
     })
@@ -99,18 +193,21 @@ paymentsRouter.post('/create-order', async (req, res, next) => {
       name: lead.name,
       email: lead.email,
       phone: lead.phone,
+      tenantId: login.tenantId,
     })
   } catch (error) {
     next(error)
   }
 })
 
-paymentsRouter.post('/verify', async (req, res, next) => {
+paymentsRouter.post('/verify', requireAuth, async (req, res, next) => {
   try {
     const lead = validateLead(req.body)
     if (lead.error) {
       return res.status(400).json({ message: lead.error })
     }
+
+    assertAuthEmail(req.auth, lead.email)
 
     const orderId = String(req.body?.razorpay_order_id || '')
     const paymentId = String(req.body?.razorpay_payment_id || '')
@@ -120,11 +217,7 @@ paymentsRouter.post('/verify', async (req, res, next) => {
       return res.status(400).json({ message: 'Missing payment confirmation details.' })
     }
 
-    const keySecret = process.env.RAZORPAY_KEY_SECRET
-    if (!keySecret) {
-      return res.status(500).json({ message: 'Razorpay is not configured on the server.' })
-    }
-
+    const { keySecret } = getRazorpay()
     const expected = crypto
       .createHmac('sha256', keySecret)
       .update(`${orderId}|${paymentId}`)
@@ -134,69 +227,132 @@ paymentsRouter.post('/verify', async (req, res, next) => {
       return res.status(400).json({ message: 'Payment verification failed.' })
     }
 
-    const webinarLink = getWebinarLink()
-    const entries = await loadEntries()
-    const existing = entries.find((entry) => entry.email === lead.email)
-
+    // Idempotent short-circuit before rewrite/email.
+    const existing = await findPaymentAnywhere(paymentId)
     if (existing) {
-      existing.name = lead.name
-      existing.phone = lead.phone
-      existing.paymentId = paymentId
-      existing.orderId = orderId
-      existing.amount = WORKSHOP_AMOUNT_PAISE
-      existing.paidAt = new Date().toISOString()
-      existing.status = 'paid'
-      existing.webinarLink = webinarLink || existing.webinarLink || null
-    } else {
-      entries.push({
-        name: lead.name,
-        email: lead.email,
-        phone: lead.phone,
+      return res.status(200).json({
+        message:
+          'Your payment is already confirmed. Now you are in for the Webinar.',
         paymentId,
-        orderId,
-        amount: WORKSHOP_AMOUNT_PAISE,
-        paidAt: new Date().toISOString(),
-        status: 'paid',
-        webinarLink: webinarLink || null,
-        joinedAt: new Date().toISOString(),
+        webinarLink: existing.webinarLink || getWebinarLink() || null,
+        emailSent: false,
+        emailError: null,
+        alreadyRecorded: true,
+        tenantId: existing.tenantId || null,
       })
     }
 
-    await saveEntries(entries)
-
-    let emailSent = false
-    let emailError = null
-
     console.log('[payments] email config', getEmailConfigStatus())
 
-    if (isEmailConfigured()) {
-      try {
-        await sendWebinarPaymentEmail({
-          to: lead.email,
-          name: lead.name,
-          paymentId,
-          webinarLink,
-        })
-        emailSent = true
-      } catch (error) {
-        console.error('Failed to send webinar email:', error)
-        emailError = error.message || 'Could not send email.'
-      }
-    } else {
-      emailError = 'Email is not configured on the server.'
-      console.warn(emailError)
-    }
+    const result = await finalizePaidSeat({
+      auth: req.auth,
+      lead,
+      orderId,
+      paymentId,
+      sendEmail: true,
+    })
 
     return res.status(200).json({
-      message: emailSent
-        ? 'Your payment is done. Now you are in for the Webinar. Check your Gmail for the join link.'
-        : 'Your payment is done. Now you are in for the Webinar. Email could not be sent automatically.',
+      message: result.alreadyRecorded
+        ? 'Your payment is already confirmed. Now you are in for the Webinar.'
+        : result.emailSent
+          ? 'Your payment is done. Now you are in for the Webinar. Check your Gmail for the join link.'
+          : 'Your payment is done. Now you are in for the Webinar. Email could not be sent automatically.',
       paymentId,
-      webinarLink: webinarLink || null,
-      emailSent,
-      emailError,
+      webinarLink: result.webinarLink,
+      emailSent: result.emailSent,
+      emailError: result.emailError,
+      alreadyRecorded: result.alreadyRecorded,
+      tenantId: result.saved.tenantId,
+      profileStatus: result.saved.profile?.status || 'paid',
     })
   } catch (error) {
     next(error)
+  }
+})
+
+/**
+ * Razorpay webhook — captures payment even if browser closes.
+ * Configure webhook URL: https://YOUR-API/api/payments/webhook
+ * Secret: RAZORPAY_WEBHOOK_SECRET
+ */
+paymentsRouter.post('/webhook', async (req, res) => {
+  try {
+    const webhookSecret = String(process.env.RAZORPAY_WEBHOOK_SECRET || '').trim()
+    if (!webhookSecret) {
+      return res.status(503).json({ message: 'Webhook secret not configured.' })
+    }
+
+    const signature = String(req.headers['x-razorpay-signature'] || '')
+    const rawBody = req.rawBody || JSON.stringify(req.body || {})
+    const expected = crypto
+      .createHmac('sha256', webhookSecret)
+      .update(rawBody)
+      .digest('hex')
+
+    if (expected !== signature) {
+      return res.status(400).json({ message: 'Invalid webhook signature.' })
+    }
+
+    const event = req.body?.event
+    const entity = req.body?.payload?.payment?.entity
+    if (event !== 'payment.captured' || !entity) {
+      return res.status(200).json({ ok: true, ignored: true })
+    }
+
+    const paymentId = String(entity.id || '')
+    const orderId = String(entity.order_id || '')
+    if (!paymentId) {
+      return res.status(200).json({ ok: true, ignored: true })
+    }
+
+    const existing = await findPaymentAnywhere(paymentId)
+    if (existing) {
+      return res.status(200).json({ ok: true, alreadyRecorded: true })
+    }
+
+    const notes = entity.notes || {}
+    const uid = String(notes.uid || '').trim()
+    const email = String(notes.email || entity.email || '')
+      .trim()
+      .toLowerCase()
+    const name = String(notes.name || 'Participant').trim()
+    const phone = String(notes.phone || '').replace(/\D/g, '')
+
+    if (!uid || !email) {
+      console.warn('[payments/webhook] missing uid/email notes', {
+        paymentId,
+        orderId,
+      })
+      return res.status(200).json({ ok: true, pendingManual: true })
+    }
+
+    const result = await finalizePaidSeat({
+      auth: {
+        uid,
+        email,
+        name,
+        picture: null,
+        provider: 'google.com',
+        emailVerified: true,
+      },
+      lead: {
+        name,
+        email,
+        phone: phone.length === 10 ? phone : '0000000000',
+      },
+      orderId,
+      paymentId,
+      sendEmail: true,
+    })
+
+    return res.status(200).json({
+      ok: true,
+      alreadyRecorded: result.alreadyRecorded,
+      tenantId: result.saved.tenantId,
+    })
+  } catch (error) {
+    console.error('[payments/webhook]', error)
+    return res.status(500).json({ message: 'Webhook handling failed.' })
   }
 })

@@ -2,17 +2,20 @@ import { Router } from 'express'
 import { waitlistRouter } from './waitlist.js'
 import { authRouter } from './auth.js'
 import { paymentsRouter } from './payments.js'
+import { profileRouter } from './profile.js'
 
 export const apiRouter = Router()
 
 apiRouter.get('/', (_req, res) => {
   res.json({
-    name: 'Easy Vyapar API',
+    name: 'BizVyapar API',
     version: '0.0.0',
     message: 'Backend is ready.',
+    isolation: 'per-user-database',
   })
 })
 
 apiRouter.use('/auth', authRouter)
+apiRouter.use('/profile', profileRouter)
 apiRouter.use('/waitlist', waitlistRouter)
 apiRouter.use('/payments', paymentsRouter)

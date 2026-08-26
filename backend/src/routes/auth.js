@@ -1,66 +1,32 @@
 import { Router } from 'express'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { requireAuth } from '../db/authMiddleware.js'
 import { isFirebaseConfigured, verifyFirebaseIdToken } from '../firebaseAdmin.js'
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const dataDir = path.resolve(__dirname, '../../data')
-const usersFile = path.join(dataDir, 'users.json')
+import { touchLogin, getOwnProfile, getOwnDatabaseSnapshot } from '../db/userDb.js'
 
 export const authRouter = Router()
 
-async function loadUsers() {
-  try {
-    const raw = await readFile(usersFile, 'utf8')
-    return JSON.parse(raw)
-  } catch {
-    return []
-  }
-}
-
-async function saveUsers(users) {
-  await mkdir(dataDir, { recursive: true })
-  await writeFile(usersFile, JSON.stringify(users, null, 2), 'utf8')
-}
-
-function buildUserRecord(decoded) {
+function buildPublicProfile(profile, tenantId) {
   return {
-    uid: decoded.uid,
-    email: decoded.email || null,
-    name: decoded.name || null,
-    picture: decoded.picture || null,
-    emailVerified: Boolean(decoded.email_verified),
-    provider: decoded.firebase?.sign_in_provider || 'google.com',
-    lastLoginAt: new Date().toISOString(),
+    tenantId,
+    uid: profile.uid,
+    email: profile.email,
+    name: profile.name,
+    phone: profile.phone,
+    picture: profile.picture,
+    emailVerified: Boolean(profile.emailVerified),
+    provider: profile.provider || 'google.com',
+    status: profile.status || 'active',
+    lastLoginAt: profile.lastLoginAt,
+    createdAt: profile.createdAt,
+    updatedAt: profile.updatedAt,
   }
-}
-
-async function upsertUser(decoded) {
-  const users = await loadUsers()
-  const record = buildUserRecord(decoded)
-  const index = users.findIndex((user) => user.uid === record.uid)
-
-  if (index === -1) {
-    users.push({
-      ...record,
-      createdAt: record.lastLoginAt,
-    })
-  } else {
-    users[index] = {
-      ...users[index],
-      ...record,
-    }
-  }
-
-  await saveUsers(users)
-  return record
 }
 
 authRouter.get('/status', (_req, res) => {
   res.json({
     configured: isFirebaseConfigured(),
     provider: 'google',
+    isolation: 'per-user-database',
   })
 })
 
@@ -73,16 +39,24 @@ authRouter.post('/google', async (req, res) => {
 
   try {
     const decoded = await verifyFirebaseIdToken(idToken)
-    const user = buildUserRecord(decoded)
+    const identity = {
+      uid: decoded.uid,
+      email: decoded.email || null,
+      name: decoded.name || null,
+      picture: decoded.picture || null,
+      emailVerified: Boolean(decoded.email_verified),
+      provider: decoded.firebase?.sign_in_provider || 'google.com',
+    }
 
-    // Respond first; persist in the background for a snappier login.
-    res.json({
+    const { tenantId, profile } = await touchLogin(identity)
+
+    return res.json({
       message: 'Signed in with Google.',
-      user,
-    })
-
-    void upsertUser(decoded).catch((error) => {
-      console.error('Failed to persist user:', error.message)
+      user: buildPublicProfile(profile, tenantId),
+      isolation: {
+        mode: 'per-user-database',
+        tenantId,
+      },
     })
   } catch (error) {
     console.error('Google sign-in failed:', error.message)
@@ -92,22 +66,67 @@ authRouter.post('/google', async (req, res) => {
   }
 })
 
-authRouter.get('/me', async (req, res) => {
-  const header = req.headers.authorization || ''
-  const idToken = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
-
-  if (!idToken) {
-    return res.status(401).json({ message: 'Missing authorization token.' })
-  }
-
+authRouter.get('/me', requireAuth, async (req, res) => {
   try {
-    const decoded = await verifyFirebaseIdToken(idToken)
-    const user = await upsertUser(decoded)
+    const { tenantId, profile } = await touchLogin({
+      uid: req.auth.uid,
+      email: req.auth.email,
+      name: req.auth.name,
+      picture: req.auth.picture,
+      emailVerified: req.auth.emailVerified,
+      provider: req.auth.provider,
+    })
 
-    return res.json({ user })
+    const own = await getOwnProfile(tenantId)
+
+    return res.json({
+      user: buildPublicProfile(profile, tenantId),
+      summary: {
+        paymentCount: own.paymentCount,
+        registrationCount: own.registrationCount,
+        latestPayment: own.latestPayment
+          ? {
+              paymentId: own.latestPayment.paymentId,
+              status: own.latestPayment.status,
+              paidAt: own.latestPayment.paidAt,
+              amount: own.latestPayment.amount,
+            }
+          : null,
+      },
+      isolation: {
+        mode: 'per-user-database',
+        tenantId,
+        note: 'This response contains only your isolated profile data.',
+      },
+    })
   } catch (error) {
     return res.status(error.status || 401).json({
       message: error.message || 'Session expired. Please sign in again.',
+    })
+  }
+})
+
+/** Full isolated database snapshot for the signed-in user only. */
+authRouter.get('/me/database', requireAuth, async (req, res) => {
+  try {
+    const { tenantId } = await touchLogin({
+      uid: req.auth.uid,
+      email: req.auth.email,
+      name: req.auth.name,
+      picture: req.auth.picture,
+      emailVerified: req.auth.emailVerified,
+      provider: req.auth.provider,
+    })
+
+    const db = await getOwnDatabaseSnapshot(tenantId)
+    return res.json({
+      tenantId,
+      database: db,
+      isolation: 'strict-own-data-only',
+    })
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      message: error.message || 'Could not load your database.',
     })
   }
 })

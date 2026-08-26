@@ -1,31 +1,73 @@
 import 'dotenv/config'
-import cors from 'cors'
-import express from 'express'
-import { healthRouter } from './routes/health.js'
-import { apiRouter } from './routes/api.js'
+import app from './app.js'
 import { getEmailConfigStatus } from './email.js'
+import { getHost, getPort, getRuntimeStatus } from './config.js'
+import { migrateLegacySharedData } from './db/migrate.js'
+import { ensureDataLayout } from './db/paths.js'
+import { closePostgres, initPostgres, isPostgresEnabled } from './db/postgres.js'
+import { startReminderScheduler } from './db/reminders.js'
 
-const app = express()
-const PORT = process.env.PORT || 5000
+const PORT = getPort()
+const HOST = getHost()
 
-app.use(
-  cors({
-    origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
-  }),
-)
-app.use(express.json())
+await ensureDataLayout()
 
-app.use('/api/health', healthRouter)
-app.use('/api', apiRouter)
-
-app.use((err, _req, res, _next) => {
-  console.error(err)
-  res.status(err.status || 500).json({
-    message: err.message || 'Internal server error',
+if (isPostgresEnabled()) {
+  await initPostgres()
+} else {
+  console.log('[db] DATABASE_URL not set — using isolated file tenants')
+  await migrateLegacySharedData().catch((error) => {
+    console.error('[db] legacy migration failed', error)
   })
+}
+
+const reminderTimer = startReminderScheduler()
+
+const server = app.listen(PORT, HOST, () => {
+  const runtime = getRuntimeStatus()
+  console.log(`BizVyapar API listening on http://${HOST}:${PORT}`)
+  console.log('[email]', getEmailConfigStatus())
+  console.log('[runtime]', {
+    ready: runtime.ready,
+    database: isPostgresEnabled() ? 'postgres' : 'file-tenants',
+    razorpay: runtime.razorpay,
+    email: runtime.email,
+    firebase: runtime.firebase,
+    webinarLink: runtime.webinarLink,
+    cors: runtime.cors,
+    missing: runtime.missing,
+    isolation: 'per-user-tenant',
+  })
+
+  if (!runtime.ready) {
+    console.warn(
+      '[runtime] Server started, but some production env vars are missing:',
+      runtime.missing.join(', '),
+    )
+  }
 })
 
-app.listen(PORT, () => {
-  console.log(`Easy Vyapar API running on http://localhost:${PORT}`)
-  console.log('[email]', getEmailConfigStatus())
+function shutdown(signal) {
+  console.log(`[shutdown] ${signal} received, closing server...`)
+  if (reminderTimer) clearInterval(reminderTimer)
+  server.close(async () => {
+    await closePostgres().catch(() => undefined)
+    process.exit(0)
+  })
+
+  setTimeout(() => {
+    console.error('[shutdown] Forced exit after timeout')
+    process.exit(1)
+  }, 10_000).unref()
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'))
+process.on('SIGINT', () => shutdown('SIGINT'))
+
+process.on('uncaughtException', (error) => {
+  console.error('[fatal] uncaughtException', error)
+})
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[fatal] unhandledRejection', reason)
 })

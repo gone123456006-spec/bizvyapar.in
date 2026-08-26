@@ -1,0 +1,30 @@
+# Pings Render backend /health every minute to reduce idle sleep.
+# Set repo secret KEEPALIVE_URL = https://YOUR-SERVICE.onrender.com/health
+
+name: Backend keep-alive
+
+on:
+  schedule:
+    - cron: "* * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: GET /health
+        env:
+          KEEPALIVE_URL: ${{ secrets.KEEPALIVE_URL }}
+        run: |
+          if [ -z "$KEEPALIVE_URL" ]; then
+            echo "Missing secret KEEPALIVE_URL"
+            exit 1
+          fi
+          ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          code=$(curl -sS -o /tmp/keepalive-body.txt -w "%{http_code}" --max-time 15 "$KEEPALIVE_URL" || echo "000")
+          echo "[keepalive] $ts status=$code url=$KEEPALIVE_URL"
+          head -c 200 /tmp/keepalive-body.txt || true
+          echo
+          # Do not fail the workflow on transient errors — next minute retries.
+          exit 0
