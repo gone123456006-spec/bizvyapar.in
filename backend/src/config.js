@@ -2,6 +2,14 @@
  * Shared runtime config helpers for local + Render production.
  */
 
+const DEFAULT_ORIGINS = [
+  'https://www.bizvyapar.in',
+  'https://bizvyapar.in',
+  'https://bizvyapar-in-frontend.vercel.app',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+]
+
 export function getPort() {
   return Number(process.env.PORT || 5000)
 }
@@ -12,10 +20,12 @@ export function getHost() {
 }
 
 export function getAllowedOrigins() {
-  return String(process.env.CORS_ORIGIN || '')
+  const fromEnv = String(process.env.CORS_ORIGIN || '')
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean)
+
+  return [...new Set([...DEFAULT_ORIGINS, ...fromEnv])]
 }
 
 export function getRuntimeStatus() {

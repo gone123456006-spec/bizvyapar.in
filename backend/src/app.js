@@ -16,6 +16,7 @@ export function createApp() {
   app.use(
     cors({
       origin(origin, callback) {
+        // Same-origin / server-to-server / curl (no Origin header)
         if (!origin) {
           callback(null, true)
           return
@@ -30,8 +31,12 @@ export function createApp() {
           return
         }
 
-        callback(null, false)
+        console.warn('[cors] blocked origin:', origin)
+        callback(new Error(`CORS blocked for origin: ${origin}`))
       },
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
     }),
   )
 

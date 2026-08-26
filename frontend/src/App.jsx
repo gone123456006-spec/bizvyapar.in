@@ -109,19 +109,50 @@ function loadRazorpayScript() {
 
     const existing = document.querySelector('script[data-razorpay="1"]')
     if (existing) {
-      existing.addEventListener('load', () => resolve(window.Razorpay), { once: true })
-      existing.addEventListener('error', () => reject(new Error('Failed to load Razorpay.')), {
-        once: true,
-      })
+      if (window.Razorpay) {
+        resolve(window.Razorpay)
+        return
+      }
+      existing.addEventListener('load', () => {
+        if (window.Razorpay) resolve(window.Razorpay)
+        else reject(new Error('Razorpay script loaded but checkout is unavailable.'))
+      }, { once: true })
+      existing.addEventListener(
+        'error',
+        () =>
+          reject(
+            new Error(
+              'Failed to load Razorpay checkout. Disable ad-block, or try another browser.',
+            ),
+          ),
+        { once: true },
+      )
       return
     }
 
     const script = document.createElement('script')
     script.src = 'https://checkout.razorpay.com/v1/checkout.js'
     script.async = true
+    script.crossOrigin = 'anonymous'
     script.dataset.razorpay = '1'
-    script.onload = () => resolve(window.Razorpay)
-    script.onerror = () => reject(new Error('Failed to load Razorpay.'))
+
+    const timeout = window.setTimeout(() => {
+      reject(new Error('Razorpay checkout timed out. Check your internet and try again.'))
+    }, 15000)
+
+    script.onload = () => {
+      window.clearTimeout(timeout)
+      if (window.Razorpay) resolve(window.Razorpay)
+      else reject(new Error('Razorpay script loaded but checkout is unavailable.'))
+    }
+    script.onerror = () => {
+      window.clearTimeout(timeout)
+      reject(
+        new Error(
+          'Failed to load Razorpay checkout. Disable ad-block, or try another browser.',
+        ),
+      )
+    }
     document.body.appendChild(script)
   })
 }
@@ -132,18 +163,35 @@ async function createPaymentOrder(lead) {
     throw new Error('Please sign in with Google before payment.')
   }
 
-  const orderRes = await fetch(apiUrl('/api/payments/create-order'), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(lead),
-  })
-  const orderData = await orderRes.json()
+  let orderRes
+  try {
+    orderRes = await fetch(apiUrl('/api/payments/create-order'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(lead),
+    })
+  } catch {
+    throw new Error(
+      'Could not reach payment server. Confirm VITE_API_BASE_URL and Render API are online.',
+    )
+  }
+
+  let orderData = {}
+  try {
+    orderData = await orderRes.json()
+  } catch {
+    orderData = {}
+  }
 
   if (!orderRes.ok) {
-    throw new Error(orderData.message || 'Could not start payment.')
+    throw new Error(orderData.message || `Could not start payment (${orderRes.status}).`)
+  }
+
+  if (!orderData.orderId || !orderData.keyId) {
+    throw new Error('Payment order response was incomplete. Check Razorpay keys on Render.')
   }
 
   return orderData
