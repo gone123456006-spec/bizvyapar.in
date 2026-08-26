@@ -264,12 +264,14 @@
   top: calc(100% + 10px);
   right: 0;
   z-index: 40;
-  width: min(280px, calc(100% - 24px));
+  width: 280px;
+  min-width: 260px;
   padding: 12px 0 8px;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   background: #fff;
   box-shadow: 0 12px 32px rgba(17, 24, 39, 0.14);
+  box-sizing: border-box;
 }
 
 .profile-menu-header {
@@ -371,6 +373,7 @@
   font-size: 14px;
   font-weight: 500;
   text-align: left;
+  white-space: nowrap;
   cursor: pointer;
   transition: background-color 0.15s ease;
 }
@@ -421,6 +424,22 @@
 
   .nav-profile {
     padding: 0 6px;
+  }
+
+  /* Fixed, centered profile menu — avoids tiny width from avatar parent */
+  .profile-menu {
+    position: fixed;
+    top: 72px;
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: min(300px, calc(100vw - 32px));
+    min-width: min(260px, calc(100vw - 32px));
+    z-index: 80;
+  }
+
+  .profile-menu-item {
+    white-space: nowrap;
   }
 }
 
@@ -673,16 +692,40 @@
   }
 
   .hero-points-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
   }
 
   .hero-point-card {
-    border-radius: 16px;
+    gap: 8px;
+    padding: 14px 12px;
+    border-radius: 14px;
   }
 
-  .hero-point-card p,
   .hero-point-card strong {
+    margin-bottom: 4px;
+    font-size: 13px;
     white-space: normal;
+    line-height: 1.25;
+  }
+
+  .hero-point-card p {
+    font-size: 11px;
+    white-space: normal;
+    line-height: 1.35;
+  }
+
+  .hero-point-check {
+    width: 18px;
+    height: 18px;
+    margin-top: 1px;
+  }
+
+  .hero-point-check::after {
+    left: 5px;
+    top: 3px;
+    width: 4px;
+    height: 7px;
   }
 }
 
@@ -1156,15 +1199,17 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   color: #5f6b70;
   font-size: 13px;
   line-height: 1.35;
+  white-space: nowrap;
 }
 
 .payment-perks li span {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
+  white-space: nowrap;
 }
 
 .payment-perk-check {
@@ -1172,10 +1217,10 @@
   align-items: center;
   justify-content: flex-end;
   flex-shrink: 0;
-  width: 40px;
-  min-width: 40px;
+  width: 28px;
+  min-width: 28px;
   height: 22px;
-  margin: 0 8px 0 0;
+  margin: 0;
   border-radius: 0;
   background: transparent;
   color: #fff;
@@ -3213,6 +3258,31 @@
   .payment-illustration {
     width: min(100%, 140px);
     max-height: 120px;
+  }
+
+  .payment-summary {
+    padding: 12px 12px 12px 12px;
+  }
+
+  .payment-perks li {
+    gap: 6px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .payment-perks li span {
+    white-space: nowrap;
+  }
+
+  .payment-perk-check {
+    width: 24px;
+    min-width: 24px;
+  }
+
+  .payment-perk-check svg {
+    width: 18px;
+    height: 18px;
+    padding: 2px;
   }
 }
 
