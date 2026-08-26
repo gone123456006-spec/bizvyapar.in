@@ -228,6 +228,8 @@ export default function App() {
     getCountdownParts(getNextWorkshopSunday()),
   )
   const pendingOrderRef = useRef(null)
+  const siteHeaderRef = useRef(null)
+  const [profileMenuTop, setProfileMenuTop] = useState(118)
 
   async function refreshSubscription() {
     try {
@@ -359,6 +361,25 @@ export default function App() {
   useEffect(() => {
     if (!user) setShowProfileMenu(false)
   }, [user])
+
+  useEffect(() => {
+    if (!showProfileMenu) return undefined
+
+    function placeProfileMenu() {
+      const header = siteHeaderRef.current
+      if (!header) return
+      const bottom = header.getBoundingClientRect().bottom
+      setProfileMenuTop(Math.ceil(bottom + 10))
+    }
+
+    placeProfileMenu()
+    window.addEventListener('resize', placeProfileMenu)
+    window.addEventListener('scroll', placeProfileMenu, { passive: true })
+    return () => {
+      window.removeEventListener('resize', placeProfileMenu)
+      window.removeEventListener('scroll', placeProfileMenu)
+    }
+  }, [showProfileMenu])
 
   async function openJoinForm(event) {
     if (event) event.preventDefault()
@@ -622,7 +643,7 @@ export default function App() {
 
   return (
     <div className="page">
-      <div className="site-header">
+      <div className="site-header" ref={siteHeaderRef}>
         <div className="top-bar">
           <p>
             <strong>Learn simple GST billing</strong> for your shop
@@ -712,7 +733,16 @@ export default function App() {
                   className="profile-menu"
                   role="menu"
                   aria-label="Profile menu"
+                  style={{ '--profile-menu-top': `${profileMenuTop}px` }}
                 >
+                  <button
+                    type="button"
+                    className="profile-menu-close"
+                    aria-label="Close profile menu"
+                    onClick={() => setShowProfileMenu(false)}
+                  >
+                    ×
+                  </button>
                   <div className="profile-menu-header">
                     {user.picture ? (
                       <img
@@ -756,19 +786,19 @@ export default function App() {
                     >
                       Open webinar link
                     </button>
-                  ) : null}
-
-                  <button
-                    className="profile-menu-item"
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setShowProfileMenu(false)
-                      void openJoinForm()
-                    }}
-                  >
-                    {subscriptionActive ? 'View webinar access' : 'View Profile'}
-                  </button>
+                  ) : (
+                    <button
+                      className="profile-menu-item"
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setShowProfileMenu(false)
+                        void openJoinForm()
+                      }}
+                    >
+                      View Profile
+                    </button>
+                  )}
                   <button
                     className="profile-menu-item"
                     type="button"

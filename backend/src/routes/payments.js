@@ -109,7 +109,6 @@ async function finalizePaidSeat({
     },
   )
 
-  let emailSent = false
   let emailError = null
 
   if (saved.alreadyRecorded) {

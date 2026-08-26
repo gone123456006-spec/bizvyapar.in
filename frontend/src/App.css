@@ -11,7 +11,7 @@
 .site-header {
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 50;
 }
 
 .top-bar {
@@ -99,6 +99,8 @@
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  position: relative;
+  z-index: 55;
   color: var(--on-surface);
   text-decoration: none;
 }
@@ -261,7 +263,7 @@
 
 .profile-menu {
   position: absolute;
-  top: calc(100% + 10px);
+  top: calc(100% + 14px);
   right: 0;
   z-index: 40;
   width: 280px;
@@ -274,11 +276,34 @@
   box-sizing: border-box;
 }
 
+.profile-menu-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #6b7280;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.profile-menu-close:hover,
+.profile-menu-close:focus-visible {
+  background: #f3f4f6;
+  color: #111827;
+  outline: none;
+}
+
 .profile-menu-header {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 4px 14px 12px;
+  padding: 4px 40px 12px 14px;
   border-bottom: 1px solid #f1f5f9;
   margin-bottom: 6px;
 }
@@ -365,13 +390,13 @@
 .profile-menu-item {
   display: block;
   width: 100%;
-  padding: 10px 14px;
+  padding: 12px 16px;
   border: none;
   background: transparent;
   color: #111827;
   font-family: inherit;
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 16px;
+  font-weight: 600;
   text-align: left;
   white-space: nowrap;
   cursor: pointer;
@@ -426,20 +451,39 @@
     padding: 0 6px;
   }
 
-  /* Fixed, centered profile menu — avoids tiny width from avatar parent */
+  /* Keep full navbar/logo visible — menu sits below sticky header */
   .profile-menu {
     position: fixed;
-    top: 72px;
+    top: var(--profile-menu-top, 118px);
     left: 50%;
     right: auto;
     transform: translateX(-50%);
     width: min(300px, calc(100vw - 32px));
-    min-width: min(260px, calc(100vw - 32px));
-    z-index: 80;
+    min-width: 0;
+    z-index: 40;
+  }
+
+  .site-header {
+    z-index: 50;
+  }
+
+  .nav-brand {
+    z-index: 55;
   }
 
   .profile-menu-item {
+    font-size: 16px;
+    font-weight: 600;
+    padding: 12px 16px;
     white-space: nowrap;
+  }
+
+  .profile-menu-name {
+    font-size: 15px;
+  }
+
+  .profile-menu-email {
+    font-size: 13px;
   }
 }
 
