@@ -512,50 +512,50 @@ export default function App() {
           color: '#006b3c',
         },
         handler: (response) => {
+          const paymentId = response?.razorpay_payment_id || ''
+          const fallbackLink = String(
+            import.meta.env.VITE_WEBINAR_LINK || '',
+          ).trim()
+
+          // Show webinar success popup instantly — don't wait on verify/email.
+          pendingOrderRef.current = null
+          setSubscriptionActive(true)
+          setSubmitted({
+            name: payName,
+            email: payEmail,
+            phone: payPhone,
+            webinarLink: fallbackLink || null,
+            emailSent: false,
+            emailError: null,
+            paymentId,
+          })
+          setJoinStep('success')
+          setStatus('success')
+          setMessage(
+            'Your payment is done. Now you are in for the Webinar.',
+          )
+
+          // Confirm on server in background; update link/email when ready.
           void (async () => {
-            setStatus('loading')
-            setMessage('Payment received. Confirming your seat…')
-
-            const paymentId = response?.razorpay_payment_id || ''
-            const controller = new AbortController()
-            const timer = window.setTimeout(() => controller.abort(), 45000)
-
             try {
               const token = await getAccessToken()
-              if (!token) {
-                throw new Error('Please sign in with Google to confirm payment.')
-              }
+              if (!token) return
 
-              let verifyRes
-              try {
-                verifyRes = await fetch(apiUrl('/api/payments/verify'), {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${token}`,
-                  },
-                  signal: controller.signal,
-                  body: JSON.stringify({
-                    name: payName,
-                    email: payEmail,
-                    phone: payPhone,
-                    razorpay_order_id: response.razorpay_order_id,
-                    razorpay_payment_id: response.razorpay_payment_id,
-                    razorpay_signature: response.razorpay_signature,
-                  }),
-                })
-              } catch (networkError) {
-                if (networkError?.name === 'AbortError') {
-                  throw new Error(
-                    'Confirmation timed out. If ₹1 was deducted, your seat is likely booked — check Gmail or contact support with payment ID ' +
-                      paymentId,
-                  )
-                }
-                throw new Error(
-                  'Could not confirm payment with server. If ₹1 was deducted, contact support with payment ID ' +
-                    paymentId,
-                )
-              }
+              const verifyRes = await fetch(apiUrl('/api/payments/verify'), {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                  name: payName,
+                  email: payEmail,
+                  phone: payPhone,
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature,
+                }),
+              })
 
               let verifyData = {}
               try {
@@ -564,34 +564,24 @@ export default function App() {
                 verifyData = {}
               }
 
-              if (!verifyRes.ok) {
-                throw new Error(
-                  verifyData.message ||
-                    `Payment verification failed (${verifyRes.status}). Payment ID: ${paymentId}`,
-                )
-              }
+              if (!verifyRes.ok) return
 
-              pendingOrderRef.current = null
-              setSubscriptionActive(true)
-              setSubmitted({
+              setSubmitted((prev) => ({
+                ...(prev || {}),
                 name: payName,
                 email: payEmail,
                 phone: payPhone,
-                webinarLink: verifyData.webinarLink || null,
+                webinarLink:
+                  verifyData.webinarLink || prev?.webinarLink || fallbackLink || null,
                 emailSent: Boolean(verifyData.emailSent),
                 emailError: verifyData.emailError || null,
-              })
-              setJoinStep('success')
-              setStatus('success')
-              setMessage(
-                verifyData.message ||
-                  'Your payment is done. Now you are in for the Webinar.',
-              )
+                paymentId,
+              }))
+              if (verifyData.message) setMessage(verifyData.message)
+              setSubscriptionActive(true)
+              void refreshSubscription()
             } catch (error) {
-              setStatus('error')
-              setMessage(error.message || 'Payment verification failed.')
-            } finally {
-              window.clearTimeout(timer)
+              console.warn('[payments] background verify failed', error)
             }
           })()
         },
