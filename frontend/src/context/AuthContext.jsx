@@ -135,7 +135,7 @@ export function AuthProvider({ children }) {
       }
       if (err.code === 'auth/unauthorized-domain') {
         setError(
-          'This domain is not allowed in Firebase. Add localhost in Authentication → Settings → Authorized domains.',
+          'This domain is not allowed in Firebase. Add it in Firebase Console → Authentication → Settings → Authorized domains.',
         )
         return null
       }

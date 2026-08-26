@@ -1,4 +1,4 @@
-# Render Blueprint — BizVyapar API + keep-alive cron + optional Postgres
+# Render Blueprint — BizVyapar API + keep-alive cron + Postgres
 # Docs: https://render.com/docs/blueprint-spec
 
 databases:
@@ -44,6 +44,7 @@ services:
         fromDatabase:
           name: bizvyapar-db
           property: connectionString
+      # Fill these in Render Dashboard → Environment (or paste the block from chat)
       - key: CORS_ORIGIN
         sync: false
       - key: RAZORPAY_KEY_ID
@@ -67,7 +68,6 @@ services:
       - key: FIREBASE_PRIVATE_KEY
         sync: false
 
-  # External 1-minute ping so the free web service stays warm.
   - type: cron
     name: bizvyapar-keepalive
     runtime: node

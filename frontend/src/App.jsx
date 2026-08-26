@@ -170,7 +170,6 @@ export default function App() {
   const [status, setStatus] = useState('idle')
   const [message, setMessage] = useState('')
   const [submitted, setSubmitted] = useState(null)
-  const [showPopup, setShowPopup] = useState(false)
   const [showJoinForm, setShowJoinForm] = useState(false)
   const [joinStep, setJoinStep] = useState('details')
   const [showProfileMenu, setShowProfileMenu] = useState(false)
@@ -203,16 +202,6 @@ export default function App() {
     }, 1000)
 
     return () => window.clearInterval(tick)
-  }, [])
-
-  useEffect(() => {
-    if (sessionStorage.getItem('ev_waitlist_popup') === '1') return undefined
-
-    const timer = window.setTimeout(() => {
-      setShowPopup(true)
-    }, 800)
-
-    return () => window.clearTimeout(timer)
   }, [])
 
   useEffect(() => {
@@ -258,15 +247,8 @@ export default function App() {
     if (!user) setShowProfileMenu(false)
   }, [user])
 
-  function closePopup() {
-    setShowPopup(false)
-    sessionStorage.setItem('ev_waitlist_popup', '1')
-  }
-
   function openJoinForm(event) {
     if (event) event.preventDefault()
-    setShowPopup(false)
-    sessionStorage.setItem('ev_waitlist_popup', '1')
     setJoinStep('details')
     setStatus('idle')
     setMessage('')
@@ -1097,58 +1079,6 @@ export default function App() {
           <p>Waitlist webinar for Indian small businesses.</p>
         </div>
       </footer>
-
-      {showPopup && (
-        <div
-          className="popup-overlay"
-          role="presentation"
-          onClick={closePopup}
-        >
-          <div
-            className="popup-banner"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="popup-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button
-              type="button"
-              className="popup-close"
-              aria-label="Close"
-              onClick={closePopup}
-            >
-              ×
-            </button>
-
-            <img
-              className="brand-logo brand-logo--modal"
-              src="/images/logo.png?v=2"
-              alt="BizVyapar"
-            />
-            <h2 id="popup-title">Save Your Spot For Sunday.</h2>
-            <p>
-              Join the waiting list first. You’ll receive confirmation after
-              registration.
-            </p>
-
-            <div className="popup-actions">
-              <button
-                className="spot-cta"
-                type="button"
-                onClick={openJoinForm}
-              >
-                Join now &gt;
-              </button>
-              <p className="spot-pill">
-                <span>
-                  Scheduled on <strong>{formatWorkshopDay(nextWorkshop)}</strong>{' '}
-                  at <strong>5:00 PM</strong>
-                </span>
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {showJoinForm && (
         <div
