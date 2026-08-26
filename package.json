@@ -21,8 +21,8 @@
     "preview": "npm run preview --workspace=frontend"
   },
   "allowScripts": {
-    "@firebase/util": true,
-    "protobufjs": true
+    "@firebase/util@1.15.3": true,
+    "protobufjs@7.6.5": true
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

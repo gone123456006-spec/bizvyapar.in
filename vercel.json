@@ -1,8 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "npm install",
-  "buildCommand": "npm run build",
-  "outputDirectory": "frontend/dist",
+  "buildCommand": "npm run build && node scripts/copy-frontend-dist.mjs",
+  "outputDirectory": "dist",
   "framework": null,
   "functions": {
     "api/index.js": {
