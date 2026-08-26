@@ -1,15 +1,19 @@
-import admin from 'firebase-admin'
+import { cert, getApps, initializeApp } from 'firebase-admin/app'
+import { getAuth } from 'firebase-admin/auth'
 import { createRemoteJWKSet, jwtVerify } from 'jose'
 
 let initialized = false
 let jwks = null
 
 function getCredentials() {
-  const projectId = process.env.FIREBASE_PROJECT_ID
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n')
+  const projectId = String(process.env.FIREBASE_PROJECT_ID || '').trim()
+  const clientEmail = String(process.env.FIREBASE_CLIENT_EMAIL || '').trim()
+  let privateKey = String(process.env.FIREBASE_PRIVATE_KEY || '').trim()
 
-  if (!projectId || !clientEmail || !privateKey) {
+  // Render / dotenv often store the key with literal \n sequences
+  privateKey = privateKey.replace(/^"|"$/g, '').replace(/\\n/g, '\n')
+
+  if (!projectId || !clientEmail || !privateKey.includes('BEGIN')) {
     return null
   }
 
@@ -17,27 +21,38 @@ function getCredentials() {
 }
 
 export function getProjectId() {
-  return process.env.FIREBASE_PROJECT_ID || null
+  return String(process.env.FIREBASE_PROJECT_ID || '').trim() || null
 }
 
 export function isFirebaseConfigured() {
   return Boolean(getProjectId())
 }
 
-export function getFirebaseAdmin() {
+/**
+ * Initialize Admin SDK only when a full service-account is present.
+ * Returns Auth helper or null (caller should fall back to JWKS).
+ */
+export function getFirebaseAuth() {
   const credentials = getCredentials()
   if (!credentials) {
     return null
   }
 
-  if (!initialized) {
-    admin.initializeApp({
-      credential: admin.credential.cert(credentials),
-    })
-    initialized = true
+  try {
+    if (!initialized) {
+      if (getApps().length === 0) {
+        initializeApp({
+          credential: cert(credentials),
+          projectId: credentials.projectId,
+        })
+      }
+      initialized = true
+    }
+    return getAuth()
+  } catch (error) {
+    console.error('[firebase-admin] init failed, using JWKS fallback:', error.message)
+    return null
   }
-
-  return admin
 }
 
 function getJwks() {
@@ -64,9 +79,9 @@ export async function verifyFirebaseIdToken(idToken) {
     throw error
   }
 
-  const firebaseAdmin = getFirebaseAdmin()
-  if (firebaseAdmin) {
-    return firebaseAdmin.auth().verifyIdToken(idToken)
+  const auth = getFirebaseAuth()
+  if (auth) {
+    return auth.verifyIdToken(idToken)
   }
 
   const { payload } = await jwtVerify(idToken, getJwks(), {
