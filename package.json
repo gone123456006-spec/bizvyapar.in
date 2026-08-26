@@ -20,6 +20,10 @@
     "lint": "npm run lint --workspace=frontend",
     "preview": "npm run preview --workspace=frontend"
   },
+  "allowScripts": {
+    "@firebase/util": true,
+    "protobufjs": true
+  },
   "devDependencies": {
     "concurrently": "^9.1.2"
   }

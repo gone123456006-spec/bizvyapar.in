@@ -8,6 +8,11 @@ export default defineConfig({
     sourcemap: false,
     cssCodeSplit: true,
     assetsInlineLimit: 4096,
+    rolldownOptions: {
+      checks: {
+        pluginTimings: false,
+      },
+    },
   },
   server: {
     host: true, // expose on LAN for phones / other devices
