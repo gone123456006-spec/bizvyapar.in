@@ -107,6 +107,28 @@ export async function initPostgres() {
     );
   `)
 
+  // Lifetime subscription columns (safe to re-run)
+  await db.query(`
+    ALTER TABLE profiles
+      ADD COLUMN IF NOT EXISTS subscription_status TEXT NOT NULL DEFAULT 'none',
+      ADD COLUMN IF NOT EXISTS subscription_type TEXT,
+      ADD COLUMN IF NOT EXISTS subscription_activated_at TIMESTAMPTZ
+  `)
+
+  // Backfill existing paid profiles to lifetime (one-time permanent)
+  await db.query(`
+    UPDATE profiles
+    SET subscription_status = 'active',
+        subscription_type = 'lifetime',
+        subscription_activated_at = COALESCE(subscription_activated_at, updated_at, NOW())
+    WHERE status = 'paid'
+      AND COALESCE(subscription_status, 'none') <> 'revoked'
+      AND (
+        subscription_status IS DISTINCT FROM 'active'
+        OR subscription_type IS DISTINCT FROM 'lifetime'
+      )
+  `)
+
   console.log('[db] Postgres schema ready')
   return { enabled: true }
 }

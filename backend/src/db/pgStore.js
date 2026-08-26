@@ -108,6 +108,9 @@ async function loadProfile(client, tenantId) {
     provider: row.provider,
     emailVerified: row.email_verified,
     status: row.status,
+    subscriptionStatus: row.subscription_status || 'none',
+    subscriptionType: row.subscription_type || null,
+    subscriptionActivatedAt: row.subscription_activated_at || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastLoginAt: row.last_login_at,
@@ -458,6 +461,9 @@ export async function pgRecordPayment(identity, payment) {
     await client.query(
       `UPDATE profiles
        SET status = 'paid',
+           subscription_status = 'active',
+           subscription_type = 'lifetime',
+           subscription_activated_at = COALESCE(subscription_activated_at, NOW()),
            name = COALESCE($2, name),
            phone = COALESCE($3, phone),
            email = COALESCE($4, email),
@@ -507,6 +513,11 @@ export async function pgRecordPayment(identity, payment) {
     await addActivity(client, tenantId, 'payment', {
       paymentId: payment.paymentId,
       amount: payment.amount,
+      subscriptionType: 'lifetime',
+    })
+    await addActivity(client, tenantId, 'subscription_activated', {
+      subscriptionType: 'lifetime',
+      paymentId: payment.paymentId,
     })
 
     await client.query('COMMIT')

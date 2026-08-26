@@ -2,10 +2,12 @@ import { Router } from 'express'
 import { requireAuth } from '../db/authMiddleware.js'
 import { isFirebaseConfigured, verifyFirebaseIdToken } from '../firebaseAdmin.js'
 import { touchLogin, getOwnProfile, getOwnDatabaseSnapshot } from '../db/userDb.js'
+import { buildSubscription } from '../subscription.js'
 
 export const authRouter = Router()
 
-function buildPublicProfile(profile, tenantId) {
+function buildPublicProfile(profile, tenantId, paymentCount = 0) {
+  const subscription = buildSubscription(profile, paymentCount)
   return {
     tenantId,
     uid: profile.uid,
@@ -16,9 +18,13 @@ function buildPublicProfile(profile, tenantId) {
     emailVerified: Boolean(profile.emailVerified),
     provider: profile.provider || 'google.com',
     status: profile.status || 'active',
+    subscriptionStatus: subscription.status,
+    subscriptionType: subscription.type,
+    subscriptionActivatedAt: subscription.activatedAt,
     lastLoginAt: profile.lastLoginAt,
     createdAt: profile.createdAt,
     updatedAt: profile.updatedAt,
+    subscription,
   }
 }
 
@@ -49,10 +55,12 @@ authRouter.post('/google', async (req, res) => {
     }
 
     const { tenantId, profile } = await touchLogin(identity)
+    const own = await getOwnProfile(tenantId)
 
     return res.json({
       message: 'Signed in with Google.',
-      user: buildPublicProfile(profile, tenantId),
+      user: buildPublicProfile(own.profile || profile, tenantId, own.paymentCount),
+      subscription: buildSubscription(own.profile || profile, own.paymentCount),
       isolation: {
         mode: 'per-user-database',
         tenantId,
@@ -78,9 +86,11 @@ authRouter.get('/me', requireAuth, async (req, res) => {
     })
 
     const own = await getOwnProfile(tenantId)
+    const subscription = buildSubscription(own.profile || profile, own.paymentCount)
 
     return res.json({
-      user: buildPublicProfile(profile, tenantId),
+      user: buildPublicProfile(own.profile || profile, tenantId, own.paymentCount),
+      subscription,
       summary: {
         paymentCount: own.paymentCount,
         registrationCount: own.registrationCount,

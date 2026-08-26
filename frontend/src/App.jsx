@@ -187,6 +187,13 @@ async function createPaymentOrder(lead) {
   }
 
   if (!orderRes.ok) {
+    if (orderRes.status === 409 && orderData.alreadySubscribed) {
+      setSubscriptionActive(true)
+      throw new Error(
+        orderData.message ||
+          'You already have a permanent lifetime subscription on this account.',
+      )
+    }
     throw new Error(orderData.message || `Could not start payment (${orderRes.status}).`)
   }
 
@@ -246,7 +253,10 @@ export default function App() {
 
       const data = await res.json()
       const latest = data.summary?.latestPayment || null
+      const subscription = data.subscription || null
       const paid =
+        subscription?.status === 'active' ||
+        data.profile?.subscriptionStatus === 'active' ||
         data.profile?.status === 'paid' ||
         Number(data.summary?.paymentCount || 0) > 0 ||
         latest?.status === 'paid'
@@ -268,6 +278,7 @@ export default function App() {
         webinarLink: latest?.webinarLink || null,
         emailSent: true,
         emailError: null,
+        subscriptionType: subscription?.type || 'lifetime',
       })
       if (paidName) setName(paidName)
       if (paidEmail) setEmail(paidEmail)
@@ -281,7 +292,9 @@ export default function App() {
   function openPaidLinksPopup() {
     setJoinStep('success')
     setStatus('success')
-    setMessage('Your subscription is active. Use the link below to join the webinar.')
+    setMessage(
+      'Subscription: Active (lifetime). Use the link below to join the webinar.',
+    )
     setShowJoinForm(true)
   }
 
@@ -597,6 +610,10 @@ export default function App() {
                 emailSent: Boolean(verifyData.emailSent),
                 emailError: verifyData.emailError || null,
                 paymentId,
+                subscriptionType:
+                  verifyData.subscription?.type ||
+                  verifyData.subscriptionType ||
+                  'lifetime',
               }))
               if (verifyData.message) setMessage(verifyData.message)
               setSubscriptionActive(true)
@@ -626,6 +643,14 @@ export default function App() {
       rzp.open()
       setStatus('idle')
     } catch (error) {
+      if (
+        String(error.message || '').toLowerCase().includes('permanent lifetime') ||
+        String(error.message || '').toLowerCase().includes('already have')
+      ) {
+        setSubscriptionActive(true)
+        openPaidLinksPopup()
+        return
+      }
       pendingOrderRef.current = null
       setStatus('error')
       setMessage(error.message || 'Could not complete payment. Please try again.')
@@ -764,7 +789,7 @@ export default function App() {
                       </span>
                       {subscriptionActive ? (
                         <span className="profile-subscription-active">
-                          Subscription active
+                          Subscription: Active
                         </span>
                       ) : (
                         <span className="profile-subscription-inactive">
@@ -1318,7 +1343,9 @@ export default function App() {
                 <div className="review-panel" role="status">
                   <h2 id="join-form-title">You’re in</h2>
                   {subscriptionActive ? (
-                    <p className="subscription-active-banner">Subscription active</p>
+                    <p className="subscription-active-banner">
+                      Subscription: Active
+                    </p>
                   ) : null}
                   <p className="join-sub">
                     {message ||

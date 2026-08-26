@@ -2,12 +2,18 @@ import { Router } from 'express'
 import crypto from 'node:crypto'
 import Razorpay from 'razorpay'
 import { requireAuth } from '../db/authMiddleware.js'
-import { findPaymentAnywhere, recordPayment, touchLogin } from '../db/userDb.js'
+import {
+  findPaymentAnywhere,
+  getOwnProfile,
+  recordPayment,
+  touchLogin,
+} from '../db/userDb.js'
 import {
   getEmailConfigStatus,
   isEmailConfigured,
   sendWebinarPaymentEmail,
 } from '../email.js'
+import { buildSubscription, isLifetimeActive } from '../subscription.js'
 
 export const paymentsRouter = Router()
 
@@ -164,6 +170,17 @@ paymentsRouter.post('/create-order', requireAuth, async (req, res, next) => {
       phone: lead.phone,
     })
 
+    const own = await getOwnProfile(login.tenantId)
+    const subscription = buildSubscription(own.profile, own.paymentCount)
+    if (isLifetimeActive(own.profile, own.paymentCount)) {
+      return res.status(409).json({
+        message:
+          'You already have a permanent lifetime subscription on this account.',
+        subscription,
+        alreadySubscribed: true,
+      })
+    }
+
     const { keyId, client } = getRazorpay()
     const receipt = `ev_${Date.now().toString(36)}`
 
@@ -178,6 +195,7 @@ paymentsRouter.post('/create-order', requireAuth, async (req, res, next) => {
         uid: req.auth.uid,
         tenantId: login.tenantId,
         product: 'Live 30-Min Workshop',
+        subscriptionType: 'lifetime',
       },
     })
 
@@ -190,6 +208,7 @@ paymentsRouter.post('/create-order', requireAuth, async (req, res, next) => {
       email: lead.email,
       phone: lead.phone,
       tenantId: login.tenantId,
+      subscriptionType: 'lifetime',
     })
   } catch (error) {
     next(error)
@@ -248,6 +267,11 @@ paymentsRouter.post('/verify', requireAuth, async (req, res, next) => {
       sendEmail: true,
     })
 
+    const subscription = buildSubscription(
+      result.saved.profile,
+      result.alreadyRecorded ? 1 : 1,
+    )
+
     return res.status(200).json({
       message: result.alreadyRecorded
         ? 'Your payment is already confirmed. Now you are in for the Webinar.'
@@ -261,6 +285,8 @@ paymentsRouter.post('/verify', requireAuth, async (req, res, next) => {
       alreadyRecorded: result.alreadyRecorded,
       tenantId: result.saved.tenantId,
       profileStatus: result.saved.profile?.status || 'paid',
+      subscription,
+      subscriptionType: 'lifetime',
     })
   } catch (error) {
     next(error)

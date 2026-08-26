@@ -9,6 +9,7 @@ import {
 import { resolveTenant, listTenantIds } from './registry.js'
 import { isPostgresEnabled } from './postgres.js'
 import * as pg from './pgStore.js'
+import { applyLifetimeEntitlement } from '../subscription.js'
 
 function emptyDatabase(tenantId) {
   const now = new Date().toISOString()
@@ -27,6 +28,9 @@ function emptyDatabase(tenantId) {
       provider: null,
       emailVerified: false,
       status: 'active',
+      subscriptionStatus: 'none',
+      subscriptionType: null,
+      subscriptionActivatedAt: null,
       createdAt: now,
       updatedAt: now,
       lastLoginAt: null,
@@ -232,16 +236,17 @@ export async function recordPayment(identity, payment) {
       }
     }
 
-    db.profile = {
-      ...db.profile,
-      tenantId,
-      email: email || db.profile.email,
-      name: payment.name || db.profile.name,
-      phone: payment.phone || db.profile.phone,
-      uid: identity.uid || db.profile.uid,
-      status: 'paid',
-      updatedAt: now,
-    }
+    db.profile = applyLifetimeEntitlement(
+      {
+        ...db.profile,
+        tenantId,
+        email: email || db.profile.email,
+        name: payment.name || db.profile.name,
+        phone: payment.phone || db.profile.phone,
+        uid: identity.uid || db.profile.uid,
+      },
+      now,
+    )
 
     const paymentRecord = {
       id: randomUUID(),
@@ -295,6 +300,11 @@ export async function recordPayment(identity, payment) {
     pushActivity(db, 'payment', {
       paymentId: payment.paymentId,
       amount: payment.amount,
+      subscriptionType: 'lifetime',
+    })
+    pushActivity(db, 'subscription_activated', {
+      subscriptionType: 'lifetime',
+      paymentId: payment.paymentId,
     })
 
     const saved = await writeTenantDb(tenantId, db)

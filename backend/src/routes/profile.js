@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { requireAuth } from '../db/authMiddleware.js'
 import { getOwnProfile, getOwnDatabaseSnapshot, touchLogin } from '../db/userDb.js'
+import { buildSubscription } from '../subscription.js'
 
 export const profileRouter = Router()
 
@@ -16,9 +17,20 @@ profileRouter.get('/me', requireAuth, async (req, res, next) => {
     })
 
     const own = await getOwnProfile(tenantId)
+    const subscription = buildSubscription(
+      own.profile || profile,
+      own.paymentCount,
+    )
 
     return res.json({
-      profile,
+      profile: {
+        ...profile,
+        ...(own.profile || {}),
+        subscriptionStatus: subscription.status,
+        subscriptionType: subscription.type,
+        subscriptionActivatedAt: subscription.activatedAt,
+      },
+      subscription,
       summary: {
         paymentCount: own.paymentCount,
         registrationCount: own.registrationCount,
