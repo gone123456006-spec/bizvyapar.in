@@ -409,6 +409,22 @@
   outline: none;
 }
 
+.profile-menu-link {
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
+.profile-menu-item--available {
+  background: #ecfdf3;
+  color: #067647;
+  font-weight: 700;
+}
+
+.profile-menu-item--available:hover,
+.profile-menu-item--available:focus-visible {
+  background: #d1fadf;
+}
+
 .nav-user-email {
   max-width: 180px;
   overflow: hidden;
