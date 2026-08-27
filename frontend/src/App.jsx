@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth, getAccessToken } from './context/AuthContext.jsx'
 import { apiUrl } from './lib/api.js'
 import { usePublicSettings } from './hooks/usePublicSettings.js'
@@ -22,6 +23,29 @@ function CheckIcon({ className = 'review-check' }) {
         <path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z" />
       </svg>
     </span>
+  )
+}
+
+/** Yellow Join now → Biz green Available Now for active subscribers only. */
+function JoinCtaButton({
+  subscriptionActive,
+  onClick,
+  className = '',
+  withArrow = true,
+}) {
+  const label = subscriptionActive
+    ? 'Available Now'
+    : withArrow
+      ? 'Join now >'
+      : 'Join now'
+  const classes = [className, subscriptionActive ? 'is-subscribed-cta' : '']
+    .filter(Boolean)
+    .join(' ')
+
+  return (
+    <button className={classes} type="button" onClick={onClick}>
+      {label}
+    </button>
   )
 }
 
@@ -385,6 +409,7 @@ function FieldIcon({ filled, children }) {
 }
 
 export default function App() {
+  const navigate = useNavigate()
   const { user, signingIn, error, signInWithGoogle, signOut } = useAuth()
   const publicSettings = usePublicSettings(4000)
   const amountLabel = publicSettings.amountLabel || '₹1'
@@ -498,6 +523,28 @@ export default function App() {
   }, [user?.uid])
 
   useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('bv_reopen_join_form')
+      if (!raw) return
+      sessionStorage.removeItem('bv_reopen_join_form')
+      if (raw !== '1') {
+        const draft = JSON.parse(raw)
+        if (typeof draft.name === 'string') setName(draft.name)
+        if (typeof draft.email === 'string') setEmail(draft.email)
+        if (typeof draft.phone === 'string') setPhone(draft.phone)
+        if (typeof draft.consent === 'boolean') setConsent(draft.consent)
+        if (typeof draft.joinStep === 'string') setJoinStep(draft.joinStep)
+      }
+      setStatus('idle')
+      setSubmitted(null)
+      setShowJoinForm(true)
+    } catch {
+      sessionStorage.removeItem('bv_reopen_join_form')
+      setShowJoinForm(true)
+    }
+  }, [])
+
+  useEffect(() => {
     if (!showJoinForm) return undefined
     if (subscriptionActive) return undefined
     loadRazorpayScript().catch(() => {})
@@ -602,6 +649,25 @@ export default function App() {
     setStatus('idle')
     setSubmitted(null)
     setShowJoinForm(true)
+  }
+
+  function openTermsFromForm(event) {
+    event.preventDefault()
+    try {
+      sessionStorage.setItem(
+        'bv_reopen_join_form',
+        JSON.stringify({
+          name,
+          email,
+          phone,
+          consent,
+          joinStep,
+        }),
+      )
+    } catch {
+      sessionStorage.setItem('bv_reopen_join_form', '1')
+    }
+    navigate('/terms')
   }
 
   function closeJoinForm() {
@@ -865,27 +931,43 @@ export default function App() {
     <div className="page">
       <div className="site-header" ref={siteHeaderRef}>
         <div className="top-bar">
-          <p>
-            <strong>Learn simple GST billing</strong> for your shop
-            <span className="top-bar-sep" aria-hidden="true">
-              |
-            </span>
-            Live workshop <strong>{formatWorkshopLabel(nextWorkshop)}</strong>
-            <span className="top-bar-sep" aria-hidden="true">
-              |
-            </span>
-            Starts in{' '}
-            <strong>
-              {countdown.days}D - {pad2(countdown.hours)}H - {pad2(countdown.minutes)}M -{' '}
-              {pad2(countdown.seconds)}S
-            </strong>
-            <span className="top-bar-sep" aria-hidden="true">
-              |
-            </span>
-            <button className="top-bar-link" type="button" onClick={openJoinForm}>
-              {subscriptionActive ? 'Available Now' : 'Join now'}
-            </button>
-          </p>
+          <div className="top-bar-marquee">
+            <div className="top-bar-track">
+              {[0, 1].map((copy) => (
+                <p
+                  key={copy}
+                  className="top-bar-text"
+                  aria-hidden={copy === 1 ? true : undefined}
+                >
+                  <strong>Info about Invoice discount session</strong>
+                  <span className="top-bar-sep" aria-hidden="true">
+                    |
+                  </span>
+                  Live workshop{' '}
+                  <strong>{formatWorkshopLabel(nextWorkshop)}</strong>
+                  <span className="top-bar-sep" aria-hidden="true">
+                    |
+                  </span>
+                  Starts in{' '}
+                  <strong>
+                    {countdown.days}D - {pad2(countdown.hours)}H -{' '}
+                    {pad2(countdown.minutes)}M - {pad2(countdown.seconds)}S
+                  </strong>
+                  <span className="top-bar-sep" aria-hidden="true">
+                    |
+                  </span>
+                  <button
+                    className="top-bar-link"
+                    type="button"
+                    tabIndex={copy === 1 ? -1 : undefined}
+                    onClick={openJoinForm}
+                  >
+                    {subscriptionActive ? 'Available Now' : 'Join now'}
+                  </button>
+                </p>
+              ))}
+            </div>
+          </div>
         </div>
 
         <header className="nav">
@@ -1160,9 +1242,11 @@ export default function App() {
               </svg>
             </div>
 
-            <button className="hero-cta" type="button" onClick={openJoinForm}>
-              Join now &gt;
-            </button>
+            <JoinCtaButton
+              className="hero-cta"
+              subscriptionActive={subscriptionActive}
+              onClick={openJoinForm}
+            />
 
             <div className="hero-stats-wrap">
               <svg
@@ -1245,19 +1329,17 @@ export default function App() {
                 <li>Partner at S G P R &amp; Co.</li>
                 <li>Strategic Financial Planning &amp; Management</li>
                 <li>
-                  Founder: Fintaxcoach, Finovert &amp; Ezywapaar
+                  Founder: Fintaxcoach, Finovert &amp; Bizvyapar
                 </li>
               </ul>
             </div>
 
             <div className="speaker-actions">
-              <button
+              <JoinCtaButton
                 className="hero-cta speaker-cta"
-                type="button"
+                subscriptionActive={subscriptionActive}
                 onClick={openJoinForm}
-              >
-                Join now &gt;
-              </button>
+              />
             </div>
           </div>
         </section>
@@ -1279,13 +1361,11 @@ export default function App() {
               </p>
 
               <div className="spot-actions register-join-actions register-join-actions--desktop">
-                <button
+                <JoinCtaButton
                   className="spot-cta"
-                  type="button"
+                  subscriptionActive={subscriptionActive}
                   onClick={openJoinForm}
-                >
-                  Join now &gt;
-                </button>
+                />
                 <p className="spot-pill register-schedule">
                   <span>
                     Scheduled on <strong>{formatWorkshopDay(nextWorkshop)}</strong>{' '}
@@ -1378,13 +1458,11 @@ export default function App() {
             </div>
 
             <div className="spot-actions register-join-actions register-join-actions--mobile">
-              <button
+              <JoinCtaButton
                 className="spot-cta"
-                type="button"
+                subscriptionActive={subscriptionActive}
                 onClick={openJoinForm}
-              >
-                Join now &gt;
-              </button>
+              />
             </div>
           </div>
         </section>
@@ -1492,13 +1570,11 @@ export default function App() {
             </span>
           </blockquote>
 
-          <button
+          <JoinCtaButton
             className="hero-cta treds-summary-cta"
-            type="button"
+            subscriptionActive={subscriptionActive}
             onClick={openJoinForm}
-          >
-            Join now &gt;
-          </button>
+          />
         </section>
 
         <section className="section faq-section" id="faq" aria-labelledby="faq-title">
@@ -1531,14 +1607,26 @@ export default function App() {
 
       <footer className="footer">
         <div className="footer-inner">
-          <a className="footer-brand" href="#top">
-            <img
-              className="brand-logo brand-logo--footer"
-              src="/images/logo.png?v=2"
-              alt="BizVyapar"
-            />
-          </a>
-          <p>Waitlist webinar for Indian small businesses.</p>
+          <div className="footer-top">
+            <div className="footer-brand-block">
+              <a className="footer-brand" href="#top">
+                <img
+                  className="brand-logo brand-logo--footer"
+                  src="/images/logo.png?v=2"
+                  alt="BizVyapar"
+                />
+              </a>
+              <p className="footer-tagline">
+                Waitlist webinar for Indian small businesses.
+              </p>
+            </div>
+          </div>
+
+          <div className="footer-bottom">
+            <p className="footer-copy">
+              © {new Date().getFullYear()} BizVyapar. All rights reserved.
+            </p>
+          </div>
         </div>
       </footer>
 
@@ -1797,6 +1885,13 @@ export default function App() {
                     <p className="form-note">
                       Next step: payment to confirm your seat.
                     </p>
+                    <a
+                      className="form-terms-link"
+                      href="/terms"
+                      onClick={openTermsFromForm}
+                    >
+                      Terms &amp; Conditions
+                    </a>
                   </form>
                 </>
               )}

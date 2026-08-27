@@ -1,0 +1,125 @@
+.terms-page {
+  min-height: 100svh;
+  background: #006b3c;
+  color: #f4fff8;
+  font-family: 'Roboto', Arial, Helvetica, sans-serif;
+}
+
+.terms-top {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 6px 12px;
+  background: #006b3c;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.terms-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #ffde03;
+  font-size: 28px;
+  font-weight: 400;
+  line-height: 1;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.terms-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.terms-main {
+  width: min(820px, 100%);
+  margin: 0 auto;
+  padding: 56px 24px 64px;
+  box-sizing: border-box;
+  text-align: left;
+}
+
+.terms-main h1,
+.terms-main h2 {
+  color: #ffde03;
+  font-weight: 700;
+  text-align: left;
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.terms-main h1 {
+  margin: 0 0 10px;
+  font-size: clamp(1.55rem, 4vw, 2.1rem);
+  line-height: 1.2;
+}
+
+.terms-effective {
+  margin: 0 0 22px;
+  color: #d7f5e3;
+  font-weight: 600;
+  text-align: left;
+}
+
+.terms-main h2 {
+  margin: 28px 0 10px;
+  font-size: 1.15rem;
+}
+
+.terms-main p,
+.terms-main li {
+  color: #f2fff7;
+  line-height: 1.6;
+  text-align: left;
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.terms-main p {
+  margin: 0 0 12px;
+}
+
+.terms-main ul {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.terms-main li {
+  position: relative;
+  padding-left: 1.15em;
+}
+
+.terms-main li::before {
+  content: '•';
+  position: absolute;
+  left: 0;
+  color: #f2fff7;
+}
+
+.terms-main li + li {
+  margin-top: 6px;
+}
+
+.terms-closing {
+  margin-top: 28px !important;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 222, 3, 0.35);
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .terms-main {
+    padding: 52px 20px 48px;
+  }
+}
