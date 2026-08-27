@@ -4,6 +4,42 @@ import { apiUrl } from './lib/api.js'
 import { usePublicSettings } from './hooks/usePublicSettings.js'
 import './App.css'
 
+const WHATSAPP_CHANNEL_URL =
+  'https://whatsapp.com/channel/0029Vb8bHENHQbRzGerkML0N'
+
+function CheckIcon({ className = 'review-check' }) {
+  return (
+    <span className={className} aria-hidden="true">
+      <svg viewBox="0 0 24 24" focusable="false">
+        <path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z" />
+      </svg>
+    </span>
+  )
+}
+
+function JoinCtaButton({
+  subscriptionActive,
+  onClick,
+  className = '',
+  withArrow = true,
+  type = 'button',
+}) {
+  const label = subscriptionActive
+    ? 'Available Now'
+    : withArrow
+      ? 'Join now >'
+      : 'Join now'
+  const classes = [className, subscriptionActive ? 'is-subscribed-cta' : '']
+    .filter(Boolean)
+    .join(' ')
+
+  return (
+    <button className={classes} type={type} onClick={onClick}>
+      {label}
+    </button>
+  )
+}
+
 function WhatsAppIcon({ className = '' }) {
   return (
     <svg className={className} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
@@ -752,9 +788,12 @@ export default function App() {
             <span className="top-bar-sep" aria-hidden="true">
               |
             </span>
-            <button className="top-bar-link" type="button" onClick={openJoinForm}>
-              Join now
-            </button>
+            <JoinCtaButton
+              className="top-bar-link"
+              subscriptionActive={subscriptionActive}
+              withArrow={false}
+              onClick={openJoinForm}
+            />
           </p>
         </div>
 
@@ -865,17 +904,48 @@ export default function App() {
                   </div>
 
                   {subscriptionActive ? (
-                    <button
-                      className="profile-menu-item"
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setShowProfileMenu(false)
-                        openPaidLinksPopup()
-                      }}
-                    >
-                      Open webinar link
-                    </button>
+                    <>
+                      <a
+                        className="profile-menu-item profile-menu-link"
+                        href={WHATSAPP_CHANNEL_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        role="menuitem"
+                        onClick={() => setShowProfileMenu(false)}
+                      >
+                        WhatsApp channel
+                      </a>
+                      <a
+                        className="profile-menu-item profile-menu-link profile-menu-item--available"
+                        href={
+                          publicSettings.webinarLink ||
+                          submitted?.webinarLink ||
+                          '#register'
+                        }
+                        target={
+                          publicSettings.webinarLink || submitted?.webinarLink
+                            ? '_blank'
+                            : undefined
+                        }
+                        rel={
+                          publicSettings.webinarLink || submitted?.webinarLink
+                            ? 'noreferrer'
+                            : undefined
+                        }
+                        role="menuitem"
+                        onClick={(event) => {
+                          setShowProfileMenu(false)
+                          if (
+                            !(publicSettings.webinarLink || submitted?.webinarLink)
+                          ) {
+                            event.preventDefault()
+                            openPaidLinksPopup()
+                          }
+                        }}
+                      >
+                        Available Now
+                      </a>
+                    </>
                   ) : (
                     <button
                       className="profile-menu-item"
@@ -999,9 +1069,11 @@ export default function App() {
               </svg>
             </div>
 
-            <button className="hero-cta" type="button" onClick={openJoinForm}>
-              Join now &gt;
-            </button>
+            <JoinCtaButton
+              className="hero-cta"
+              subscriptionActive={subscriptionActive}
+              onClick={openJoinForm}
+            />
 
             <div className="hero-stats-wrap">
               <svg
@@ -1090,13 +1162,11 @@ export default function App() {
             </div>
 
             <div className="speaker-actions">
-              <button
+              <JoinCtaButton
                 className="hero-cta speaker-cta"
-                type="button"
+                subscriptionActive={subscriptionActive}
                 onClick={openJoinForm}
-              >
-                Join now &gt;
-              </button>
+              />
             </div>
           </div>
         </section>
@@ -1118,13 +1188,11 @@ export default function App() {
               </p>
 
               <div className="spot-actions register-join-actions register-join-actions--desktop">
-                <button
+                <JoinCtaButton
                   className="spot-cta"
-                  type="button"
+                  subscriptionActive={subscriptionActive}
                   onClick={openJoinForm}
-                >
-                  Join now &gt;
-                </button>
+                />
                 <p className="spot-pill register-schedule">
                   <span>
                     Scheduled on <strong>{formatWorkshopDay(nextWorkshop)}</strong>{' '}
@@ -1217,13 +1285,11 @@ export default function App() {
             </div>
 
             <div className="spot-actions register-join-actions register-join-actions--mobile">
-              <button
+              <JoinCtaButton
                 className="spot-cta"
-                type="button"
+                subscriptionActive={subscriptionActive}
                 onClick={openJoinForm}
-              >
-                Join now &gt;
-              </button>
+              />
             </div>
           </div>
         </section>
@@ -1331,13 +1397,11 @@ export default function App() {
             </span>
           </blockquote>
 
-          <button
+          <JoinCtaButton
             className="hero-cta treds-summary-cta"
-            type="button"
+            subscriptionActive={subscriptionActive}
             onClick={openJoinForm}
-          >
-            Join now &gt;
-          </button>
+          />
         </section>
 
         <section className="section faq-section" id="faq" aria-labelledby="faq-title">
@@ -1431,12 +1495,12 @@ export default function App() {
 
                   {(publicSettings.webinarLink || submitted.webinarLink) ? (
                     <a
-                      className="btn-trial"
+                      className="btn-trial is-subscribed-cta"
                       href={publicSettings.webinarLink || submitted.webinarLink}
                       target="_blank"
                       rel="noreferrer"
                     >
-                      Open webinar link
+                      Available Now
                     </a>
                   ) : (
                     <p className="join-sub">
@@ -1444,6 +1508,16 @@ export default function App() {
                       available.
                     </p>
                   )}
+
+                  <a
+                    className="btn-trial btn-whatsapp-channel"
+                    href={WHATSAPP_CHANNEL_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <WhatsAppIcon />
+                    Join WhatsApp channel
+                  </a>
                 </div>
               ) : joinStep === 'payment' ? (
                 <>
