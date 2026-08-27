@@ -5,6 +5,7 @@ import { getHost, getPort, getRuntimeStatus } from './config.js'
 import { migrateLegacySharedData } from './db/migrate.js'
 import { ensureDataLayout } from './db/paths.js'
 import { closePostgres, initPostgres, isPostgresEnabled } from './db/postgres.js'
+import { ensureAnalyticsSchema } from './db/analyticsSchema.js'
 import { startReminderScheduler } from './db/reminders.js'
 
 const PORT = getPort()
@@ -34,6 +35,9 @@ if (!isPostgresEnabled() && (isRender || isProduction) && !allowFileTenants) {
 
 if (isPostgresEnabled()) {
   await initPostgres()
+  await ensureAnalyticsSchema().catch((error) => {
+    console.error('[db] analytics schema failed', error.message)
+  })
 } else {
   console.warn(
     '[db] DATABASE_URL not set — using isolated file tenants (NOT durable on Render)',

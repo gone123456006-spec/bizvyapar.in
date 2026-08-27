@@ -5,6 +5,7 @@ import { paymentsRouter } from './payments.js'
 import { profileRouter } from './profile.js'
 import { adminRouter } from './admin.js'
 import { publicSettingsRouter } from './publicSettings.js'
+import { trackRouter } from './track.js'
 
 export const apiRouter = Router()
 
@@ -23,3 +24,4 @@ apiRouter.use('/waitlist', waitlistRouter)
 apiRouter.use('/payments', paymentsRouter)
 apiRouter.use('/admin', adminRouter)
 apiRouter.use('/public/settings', publicSettingsRouter)
+apiRouter.use('/track', trackRouter)

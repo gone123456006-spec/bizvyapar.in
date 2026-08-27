@@ -15,6 +15,7 @@ import {
 } from 'firebase/auth'
 import { auth, isFirebaseConfigured } from '../lib/firebase.js'
 import { apiUrl } from '../lib/api.js'
+import { getTrackingIds } from '../lib/visitorTracking.js'
 
 const AuthContext = createContext(null)
 const googleProvider = new GoogleAuthProvider()
@@ -31,10 +32,15 @@ function mapFirebaseUser(firebaseUser) {
 }
 
 function syncUserWithBackend(idToken) {
+  const ids = getTrackingIds()
   return fetch(apiUrl('/api/auth/google'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ idToken }),
+    body: JSON.stringify({
+      idToken,
+      sessionId: ids.sessionId,
+      visitorId: ids.visitorId,
+    }),
     keepalive: true,
   }).catch(() => null)
 }
@@ -155,6 +161,23 @@ export function AuthProvider({ children }) {
   async function signOut() {
     setError('')
     syncingUid.current = null
+    try {
+      const token = await getAccessToken()
+      if (token) {
+        const ids = getTrackingIds()
+        void fetch(apiUrl('/api/auth/logout'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ sessionId: ids.sessionId }),
+          keepalive: true,
+        }).catch(() => null)
+      }
+    } catch {
+      // ignore
+    }
     if (auth) {
       await firebaseSignOut(auth)
     }

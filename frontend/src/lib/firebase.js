@@ -26,25 +26,6 @@ let auth = null
 if (isFirebaseConfigured()) {
   app = initializeApp(firebaseConfig)
   auth = getAuth(app)
-
-  // Defer Analytics so it never competes with Sign In.
-  if (firebaseConfig.measurementId && typeof window !== 'undefined') {
-    const loadAnalytics = () => {
-      void import('firebase/analytics')
-        .then(({ getAnalytics, isSupported }) =>
-          isSupported().then((supported) => {
-            if (supported) getAnalytics(app)
-          }),
-        )
-        .catch(() => {})
-    }
-
-    if ('requestIdleCallback' in window) {
-      window.requestIdleCallback(loadAnalytics, { timeout: 4000 })
-    } else {
-      window.setTimeout(loadAnalytics, 2500)
-    }
-  }
 }
 
 export { app, auth }

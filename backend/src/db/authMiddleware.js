@@ -49,6 +49,10 @@ export async function optionalAuth(req, _res, next) {
     }
 
     const decoded = await verifyFirebaseIdToken(idToken)
+    const tenantId =
+      (await findTenantIdByUid(decoded.uid)) ||
+      (decoded.email ? await findTenantIdByEmail(decoded.email) : null)
+
     req.auth = {
       uid: decoded.uid,
       email: decoded.email || null,
@@ -56,6 +60,7 @@ export async function optionalAuth(req, _res, next) {
       picture: decoded.picture || null,
       emailVerified: Boolean(decoded.email_verified),
       provider: decoded.firebase?.sign_in_provider || 'google.com',
+      tenantId,
     }
   } catch {
     req.auth = null

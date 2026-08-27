@@ -4,11 +4,13 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import './index.css'
 import App from './App.jsx'
 import TredsDash from './pages/TredsDash.jsx'
+import AnalyticsRouteTracker from './components/AnalyticsRouteTracker.jsx'
 import { AuthProvider } from './context/AuthContext.jsx'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <BrowserRouter>
+      <AnalyticsRouteTracker />
       <AuthProvider>
         <Routes>
           <Route path="/" element={<App />} />

@@ -2,9 +2,21 @@ import { Router } from 'express'
 import { requireAuth } from '../db/authMiddleware.js'
 import { isFirebaseConfigured, verifyFirebaseIdToken } from '../firebaseAdmin.js'
 import { touchLogin, getOwnProfile, getOwnDatabaseSnapshot } from '../db/userDb.js'
+import {
+  endUserSession,
+  linkVisitorToTenant,
+  recordUserLoginSession,
+} from '../db/analyticsStore.js'
 import { buildSubscription } from '../subscription.js'
 
 export const authRouter = Router()
+
+function clientIp(req) {
+  const forwarded = String(req.headers['x-forwarded-for'] || '')
+    .split(',')[0]
+    .trim()
+  return forwarded || req.ip || req.socket?.remoteAddress || ''
+}
 
 function buildPublicProfile(profile, tenantId, paymentCount = 0) {
   const subscription = buildSubscription(profile, paymentCount)
@@ -56,6 +68,21 @@ authRouter.post('/google', async (req, res) => {
 
     const { tenantId, profile } = await touchLogin(identity)
     const own = await getOwnProfile(tenantId)
+
+    const sessionId = String(req.body?.sessionId || '').trim() || undefined
+    const visitorId = String(req.body?.visitorId || '').trim() || null
+
+    void recordUserLoginSession({
+      tenantId,
+      sessionId,
+      userAgent: req.headers['user-agent'],
+      ip: clientIp(req),
+      path: '/',
+    }).catch(() => undefined)
+
+    if (visitorId) {
+      void linkVisitorToTenant(visitorId, tenantId).catch(() => undefined)
+    }
 
     return res.json({
       message: 'Signed in with Google.',
@@ -112,6 +139,23 @@ authRouter.get('/me', requireAuth, async (req, res) => {
   } catch (error) {
     return res.status(error.status || 401).json({
       message: error.message || 'Session expired. Please sign in again.',
+    })
+  }
+})
+
+authRouter.post('/logout', requireAuth, async (req, res) => {
+  try {
+    const sessionId = String(req.body?.sessionId || '').trim()
+    if (req.auth.tenantId && sessionId) {
+      await endUserSession({
+        tenantId: req.auth.tenantId,
+        sessionId,
+      })
+    }
+    return res.json({ ok: true })
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      message: error.message || 'Logout tracking failed.',
     })
   }
 })
