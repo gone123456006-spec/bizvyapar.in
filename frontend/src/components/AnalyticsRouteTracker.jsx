@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { initAnalytics, trackPageView } from '../lib/analytics.js'
+import { initAnalytics, trackPageView, trackMetaPageView } from '../lib/analytics.js'
 import { trackSiteEngage, trackSitePageView } from '../lib/visitorTracking.js'
 
 const PAGE_TITLES = {
@@ -27,6 +27,7 @@ export default function AnalyticsRouteTracker() {
     const path = `${location.pathname}${location.search}`
     const title = PAGE_TITLES[location.pathname] || document.title
     void trackPageView(path, title)
+    trackMetaPageView()
     void trackSitePageView({ path, title })
 
     engagedRef.current = false
