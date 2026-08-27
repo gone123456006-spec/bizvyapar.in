@@ -4,13 +4,72 @@ import { apiUrl } from './lib/api.js'
 import { usePublicSettings } from './hooks/usePublicSettings.js'
 import './App.css'
 
-function CheckIcon({ className = 'review-check' }) {
+function WhatsAppIcon({ className = '' }) {
   return (
-    <span className={className} aria-hidden="true">
-      <svg viewBox="0 0 24 24" focusable="false">
-        <path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z" />
-      </svg>
-    </span>
+    <svg className={className} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+      <path
+        fill="currentColor"
+        d="M16.004 2.667c-7.36 0-13.333 5.973-13.333 13.333 0 2.347.64 4.64 1.84 6.64L2.67 29.333l6.88-1.787a13.27 13.27 0 0 0 6.453 1.654c7.36 0 13.333-5.973 13.333-13.333S23.364 2.667 16.004 2.667zm0 24.373a11.05 11.05 0 0 1-5.627-1.547l-.4-.24-4.08 1.067 1.093-3.973-.267-.427a11.04 11.04 0 0 1-1.707-5.92c0-6.107 4.973-11.08 11.08-11.08 6.107 0 11.08 4.973 11.08 11.08-.093 6.107-4.973 11.04-11.172 11.04zm6.08-8.293c-.333-.173-1.973-.973-2.28-1.093-.307-.107-.533-.16-.76.173-.227.333-.88 1.093-1.08 1.32-.2.227-.4.253-.733.08-.333-.173-1.413-.52-2.693-1.667-1-.893-1.667-1.987-1.867-2.32-.2-.333-.021-.513.147-.68.147-.147.333-.387.493-.58.16-.2.213-.333.333-.56.107-.227.053-.427-.027-.6-.08-.173-.76-1.827-1.04-2.507-.267-.64-.547-.56-.76-.56h-.653c-.227 0-.6.08-.92.4-.307.333-1.2 1.173-1.2 2.867s1.227 3.32 1.4 3.547c.173.227 2.4 3.667 5.813 5.147 2.16.933 3.013.8 3.56.747.547-.053 1.973-.8 2.253-1.573.28-.773.28-1.44.2-1.573-.08-.147-.307-.227-.64-.4z"
+      />
+    </svg>
+  )
+}
+
+function WhatsAppFloat() {
+  const [open, setOpen] = useState(false)
+  const phone = '916205425499'
+  const message =
+    'Welcome to BizVyapar (Powered by Finovert Support). How can I help you?'
+  const href = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`
+
+  return (
+    <div className={`wa-float ${open ? 'is-open' : ''}`}>
+      {open ? (
+        <div className="wa-float-panel" role="dialog" aria-label="WhatsApp support">
+          <div className="wa-float-panel-head">
+            <span className="wa-float-avatar" aria-hidden="true">
+              <WhatsAppIcon />
+            </span>
+            <div>
+              <strong>BizVyapar Support</strong>
+              <p>Powered by Finovert</p>
+            </div>
+            <button
+              type="button"
+              className="wa-float-close"
+              aria-label="Close WhatsApp chat"
+              onClick={() => setOpen(false)}
+            >
+              ×
+            </button>
+          </div>
+          <div className="wa-float-bubble">
+            <p>Welcome to BizVyapar (Powered by Finovert Support).</p>
+            <p>How can I help you?</p>
+          </div>
+          <a
+            className="wa-float-cta"
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            onClick={() => setOpen(false)}
+          >
+            <WhatsAppIcon />
+            Chat on WhatsApp
+          </a>
+        </div>
+      ) : null}
+
+      <button
+        type="button"
+        className="wa-float-btn"
+        aria-label={open ? 'Close WhatsApp support' : 'Open WhatsApp support'}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {open ? <span className="wa-float-x">×</span> : <WhatsAppIcon />}
+      </button>
+    </div>
   )
 }
 
@@ -1574,6 +1633,8 @@ export default function App() {
           </div>
         </div>
       )}
+
+      <WhatsAppFloat />
     </div>
   )
 }
