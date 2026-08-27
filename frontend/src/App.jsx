@@ -4,8 +4,16 @@ import { apiUrl } from './lib/api.js'
 import { usePublicSettings } from './hooks/usePublicSettings.js'
 import './App.css'
 
+const WHATSAPP_SUPPORT_PHONE = '919153832948'
 const WHATSAPP_CHANNEL_URL =
   'https://whatsapp.com/channel/0029Vb8bHENHQbRzGerkML0N'
+const WHATSAPP_SUBSCRIPTION_MESSAGE =
+  'Hi, I bought the BizVyapar subscription. Excited to join the webinar!'
+
+function getWhatsAppSubscriptionChatHref() {
+  const text = `${WHATSAPP_SUBSCRIPTION_MESSAGE}\n\nJoin channel: ${WHATSAPP_CHANNEL_URL}`
+  return `https://wa.me/${WHATSAPP_SUPPORT_PHONE}?text=${encodeURIComponent(text)}`
+}
 
 function CheckIcon({ className = 'review-check' }) {
   return (
@@ -14,29 +22,6 @@ function CheckIcon({ className = 'review-check' }) {
         <path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z" />
       </svg>
     </span>
-  )
-}
-
-function JoinCtaButton({
-  subscriptionActive,
-  onClick,
-  className = '',
-  withArrow = true,
-  type = 'button',
-}) {
-  const label = subscriptionActive
-    ? 'Available Now'
-    : withArrow
-      ? 'Join now >'
-      : 'Join now'
-  const classes = [className, subscriptionActive ? 'is-subscribed-cta' : '']
-    .filter(Boolean)
-    .join(' ')
-
-  return (
-    <button className={classes} type={type} onClick={onClick}>
-      {label}
-    </button>
   )
 }
 
@@ -53,7 +38,7 @@ function WhatsAppIcon({ className = '' }) {
 
 function WhatsAppFloat() {
   const [open, setOpen] = useState(false)
-  const phone = '916205425499'
+  const phone = WHATSAPP_SUPPORT_PHONE
   const message =
     'Welcome to BizVyapar (Powered by Finovert Support). How can I help you?'
   const href = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`
@@ -105,6 +90,94 @@ function WhatsAppFloat() {
       >
         {open ? <span className="wa-float-x">×</span> : <WhatsAppIcon />}
       </button>
+    </div>
+  )
+}
+
+function ChannelQrFloat() {
+  const [open, setOpen] = useState(false)
+  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=10&data=${encodeURIComponent(WHATSAPP_CHANNEL_URL)}`
+
+  useEffect(() => {
+    if (!open) return undefined
+    const previous = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (event) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = previous
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div className="qr-float">
+      <button
+        type="button"
+        className="qr-float-btn"
+        aria-label="Open WhatsApp channel QR code"
+        aria-expanded={open}
+        onClick={() => setOpen(true)}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path
+            fill="currentColor"
+            d="M3 3h8v8H3V3zm2 2v4h4V5H5zm8-2h8v8h-8V3zm2 2v4h4V5h-4zM3 13h8v8H3v-8zm2 2v4h4v-4H5zm12-2h2v2h-2v-2zm-2 2h2v2h-2v-2zm4 0h2v2h-2v-2zm-4 2h2v2h-2v-2zm4 0h2v2h-2v-2zm-2 2h2v2h-2v-2zm4 0h2v2h-2v-2zm-6 0h2v2h-2v-2z"
+          />
+        </svg>
+      </button>
+
+      {open ? (
+        <div
+          className="qr-channel-screen"
+          role="dialog"
+          aria-modal="true"
+          aria-label="BizVyapar WhatsApp channel QR"
+        >
+          <button
+            type="button"
+            className="qr-channel-close"
+            aria-label="Close QR screen"
+            onClick={() => setOpen(false)}
+          >
+            ×
+          </button>
+
+          <div className="qr-channel-card">
+            <div className="qr-channel-logo-tab">
+              <img src="/images/logo.png?v=2" alt="BizVyapar" />
+            </div>
+            <h2>Bizvyapar Invoice financing Webinar</h2>
+            <p className="qr-channel-sub">WhatsApp channel</p>
+            <div className="qr-channel-code-wrap">
+              <img
+                className="qr-channel-code"
+                src={qrSrc}
+                alt="QR code for BizVyapar WhatsApp channel"
+                width={280}
+                height={280}
+              />
+              <span className="qr-channel-wa-badge" aria-hidden="true">
+                <WhatsAppIcon />
+              </span>
+            </div>
+            <a
+              className="qr-channel-open"
+              href={WHATSAPP_CHANNEL_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open channel
+            </a>
+          </div>
+
+          <p className="qr-channel-hint">
+            Scan this QR code using the camera to view or follow this channel.
+          </p>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -392,7 +465,7 @@ export default function App() {
     setJoinStep('success')
     setStatus('success')
     setMessage(
-      'Subscription: Active (lifetime). Use the link below to join the webinar.',
+      'Subscription: Active. Use the link below to join the webinar.',
     )
     setShowJoinForm(true)
   }
@@ -788,12 +861,9 @@ export default function App() {
             <span className="top-bar-sep" aria-hidden="true">
               |
             </span>
-            <JoinCtaButton
-              className="top-bar-link"
-              subscriptionActive={subscriptionActive}
-              withArrow={false}
-              onClick={openJoinForm}
-            />
+            <button className="top-bar-link" type="button" onClick={openJoinForm}>
+              {subscriptionActive ? 'Available Now' : 'Join now'}
+            </button>
           </p>
         </div>
 
@@ -907,7 +977,7 @@ export default function App() {
                     <>
                       <a
                         className="profile-menu-item profile-menu-link"
-                        href={WHATSAPP_CHANNEL_URL}
+                        href={getWhatsAppSubscriptionChatHref()}
                         target="_blank"
                         rel="noreferrer"
                         role="menuitem"
@@ -1069,11 +1139,9 @@ export default function App() {
               </svg>
             </div>
 
-            <JoinCtaButton
-              className="hero-cta"
-              subscriptionActive={subscriptionActive}
-              onClick={openJoinForm}
-            />
+            <button className="hero-cta" type="button" onClick={openJoinForm}>
+              Join now &gt;
+            </button>
 
             <div className="hero-stats-wrap">
               <svg
@@ -1162,11 +1230,13 @@ export default function App() {
             </div>
 
             <div className="speaker-actions">
-              <JoinCtaButton
+              <button
                 className="hero-cta speaker-cta"
-                subscriptionActive={subscriptionActive}
+                type="button"
                 onClick={openJoinForm}
-              />
+              >
+                Join now &gt;
+              </button>
             </div>
           </div>
         </section>
@@ -1188,11 +1258,13 @@ export default function App() {
               </p>
 
               <div className="spot-actions register-join-actions register-join-actions--desktop">
-                <JoinCtaButton
+                <button
                   className="spot-cta"
-                  subscriptionActive={subscriptionActive}
+                  type="button"
                   onClick={openJoinForm}
-                />
+                >
+                  Join now &gt;
+                </button>
                 <p className="spot-pill register-schedule">
                   <span>
                     Scheduled on <strong>{formatWorkshopDay(nextWorkshop)}</strong>{' '}
@@ -1285,11 +1357,13 @@ export default function App() {
             </div>
 
             <div className="spot-actions register-join-actions register-join-actions--mobile">
-              <JoinCtaButton
+              <button
                 className="spot-cta"
-                subscriptionActive={subscriptionActive}
+                type="button"
                 onClick={openJoinForm}
-              />
+              >
+                Join now &gt;
+              </button>
             </div>
           </div>
         </section>
@@ -1397,11 +1471,13 @@ export default function App() {
             </span>
           </blockquote>
 
-          <JoinCtaButton
+          <button
             className="hero-cta treds-summary-cta"
-            subscriptionActive={subscriptionActive}
+            type="button"
             onClick={openJoinForm}
-          />
+          >
+            Join now &gt;
+          </button>
         </section>
 
         <section className="section faq-section" id="faq" aria-labelledby="faq-title">
@@ -1511,7 +1587,7 @@ export default function App() {
 
                   <a
                     className="btn-trial btn-whatsapp-channel"
-                    href={WHATSAPP_CHANNEL_URL}
+                    href={getWhatsAppSubscriptionChatHref()}
                     target="_blank"
                     rel="noreferrer"
                   >
@@ -1708,6 +1784,7 @@ export default function App() {
         </div>
       )}
 
+      {subscriptionActive ? <ChannelQrFloat /> : null}
       <WhatsAppFloat />
     </div>
   )
