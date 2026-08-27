@@ -16,14 +16,21 @@ healthRouter.get('/', (_req, res) => {
     ready: runtime.ready,
     isolation: 'per-user-tenant',
     database: process.env.DATABASE_URL ? 'postgres' : 'file-tenants',
+    durableSubscriptions: Boolean(process.env.DATABASE_URL),
     checks: {
       razorpay: runtime.razorpay,
       email: runtime.email,
       firebase: runtime.firebase,
       webinarLink: runtime.webinarLink,
       cors: runtime.cors,
+      database: Boolean(process.env.DATABASE_URL),
     },
-    missing: runtime.missing,
+    missing: [
+      ...runtime.missing,
+      ...(!process.env.DATABASE_URL && process.env.RENDER
+        ? ['DATABASE_URL']
+        : []),
+    ],
     emailMode: email.mode || null,
   })
 })

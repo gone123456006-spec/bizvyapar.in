@@ -67,6 +67,8 @@ services:
         sync: false
       - key: FIREBASE_PRIVATE_KEY
         sync: false
+      - key: LIFETIME_GRANT_EMAILS
+        sync: false
 
   - type: cron
     name: bizvyapar-keepalive

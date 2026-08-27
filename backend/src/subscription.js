@@ -40,3 +40,19 @@ export function applyLifetimeEntitlement(profile = {}, now = new Date().toISOStr
 export function isLifetimeActive(profile = {}, paymentCount = 0) {
   return buildSubscription(profile, paymentCount).status === 'active'
 }
+
+/** Comma-separated emails that should always keep lifetime access (recovery). */
+export function getLifetimeGrantEmails() {
+  return String(process.env.LIFETIME_GRANT_EMAILS || '')
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean)
+}
+
+export function shouldGrantLifetimeFromEnv(email) {
+  const normalized = String(email || '')
+    .trim()
+    .toLowerCase()
+  if (!normalized) return false
+  return getLifetimeGrantEmails().includes(normalized)
+}

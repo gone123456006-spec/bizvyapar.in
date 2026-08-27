@@ -9,13 +9,35 @@ import { startReminderScheduler } from './db/reminders.js'
 
 const PORT = getPort()
 const HOST = getHost()
+const isRender = Boolean(process.env.RENDER)
+const isProduction = String(process.env.NODE_ENV || '').toLowerCase() === 'production'
+const allowFileTenants =
+  String(process.env.ALLOW_FILE_TENANTS || '').toLowerCase() === 'true'
 
 await ensureDataLayout()
+
+if (!isPostgresEnabled() && (isRender || isProduction) && !allowFileTenants) {
+  console.error(
+    '[db] FATAL: DATABASE_URL is required on Render/production for permanent subscriptions.',
+  )
+  console.error(
+    '[db] File storage is wiped when the free service restarts — that is why subscriptions disappear after a few hours.',
+  )
+  console.error(
+    '[db] Fix: Render → your API service → Environment → add DATABASE_URL from a Postgres database.',
+  )
+  console.error(
+    '[db] Temporary escape hatch (not durable): ALLOW_FILE_TENANTS=true',
+  )
+  process.exit(1)
+}
 
 if (isPostgresEnabled()) {
   await initPostgres()
 } else {
-  console.log('[db] DATABASE_URL not set — using isolated file tenants')
+  console.warn(
+    '[db] DATABASE_URL not set — using isolated file tenants (NOT durable on Render)',
+  )
   await migrateLegacySharedData().catch((error) => {
     console.error('[db] legacy migration failed', error)
   })
@@ -38,6 +60,12 @@ const server = app.listen(PORT, HOST, () => {
     missing: runtime.missing,
     isolation: 'per-user-tenant',
   })
+
+  if (!isPostgresEnabled()) {
+    console.warn(
+      '[runtime] WARNING: subscriptions will NOT survive restarts without DATABASE_URL',
+    )
+  }
 
   if (!runtime.ready) {
     console.warn(

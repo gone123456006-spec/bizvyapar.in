@@ -9,7 +9,7 @@ import {
 import { resolveTenant, listTenantIds } from './registry.js'
 import { isPostgresEnabled } from './postgres.js'
 import * as pg from './pgStore.js'
-import { applyLifetimeEntitlement } from '../subscription.js'
+import { applyLifetimeEntitlement, shouldGrantLifetimeFromEnv } from '../subscription.js'
 
 function emptyDatabase(tenantId) {
   const now = new Date().toISOString()
@@ -125,6 +125,19 @@ export async function touchLogin(identity) {
       lastLoginAt: now,
       updatedAt: now,
     }
+
+    // Recovery grant + keep existing lifetime fields intact across logins
+    if (
+      shouldGrantLifetimeFromEnv(db.profile.email) &&
+      db.profile.subscriptionStatus !== 'revoked'
+    ) {
+      db.profile = applyLifetimeEntitlement(db.profile, now)
+      pushActivity(db, 'subscription_granted', {
+        source: 'LIFETIME_GRANT_EMAILS',
+        subscriptionType: 'lifetime',
+      })
+    }
+
     pushActivity(db, 'login', { provider: identity.provider || null })
     const saved = await writeTenantDb(tenantId, db)
     return { tenantId, profile: saved.profile }

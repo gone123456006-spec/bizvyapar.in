@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { getPool } from './postgres.js'
+import { shouldGrantLifetimeFromEnv } from '../subscription.js'
 
 async function upsertTenant(client, { email, uid }) {
   const normalizedEmail = email ? String(email).trim().toLowerCase() : null
@@ -204,6 +205,26 @@ export async function pgTouchLogin(identity) {
         identity.emailVerified ?? null,
       ],
     )
+
+    // Restore/grant lifetime for recovery emails without wiping other users
+    if (shouldGrantLifetimeFromEnv(identity.email)) {
+      await client.query(
+        `UPDATE profiles
+         SET status = 'paid',
+             subscription_status = 'active',
+             subscription_type = 'lifetime',
+             subscription_activated_at = COALESCE(subscription_activated_at, NOW()),
+             updated_at = NOW()
+         WHERE tenant_id = $1
+           AND COALESCE(subscription_status, 'none') <> 'revoked'`,
+        [tenantId],
+      )
+      await addActivity(client, tenantId, 'subscription_granted', {
+        source: 'LIFETIME_GRANT_EMAILS',
+        subscriptionType: 'lifetime',
+      })
+    }
+
     await addActivity(client, tenantId, 'login', {
       provider: identity.provider || null,
     })
