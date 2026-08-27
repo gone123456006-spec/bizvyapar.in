@@ -1,4 +1,4 @@
-import { apiUrl } from '../lib/api.js'
+import { apiUrl } from '../../lib/api.js'
 
 const TOKEN_KEY = 'tredsdash_token'
 
