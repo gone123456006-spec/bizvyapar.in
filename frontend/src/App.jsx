@@ -356,14 +356,13 @@ async function createPaymentOrder(lead) {
   }
 
   if (!orderRes.ok) {
-    if (orderRes.status === 409 && orderData.alreadySubscribed) {
-      setSubscriptionActive(true)
-      throw new Error(
-        orderData.message ||
-          'You already have a permanent lifetime subscription on this account.',
-      )
-    }
-    throw new Error(orderData.message || `Could not start payment (${orderRes.status}).`)
+    const error = new Error(
+      orderData.message || `Could not start payment (${orderRes.status}).`,
+    )
+    error.status = orderRes.status
+    error.alreadySubscribed = Boolean(orderData.alreadySubscribed)
+    error.subscription = orderData.subscription || null
+    throw error
   }
 
   if (!orderData.orderId || !orderData.keyId) {
@@ -419,6 +418,7 @@ export default function App() {
 
       const res = await fetch(apiUrl('/api/profile/me'), {
         headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
       })
       if (!res.ok) return false
 
@@ -473,11 +473,29 @@ export default function App() {
   useEffect(() => {
     if (!user) {
       setSubscriptionActive(false)
+      setSubmitted(null)
       return undefined
     }
-    void refreshSubscription()
-    return undefined
-  }, [user])
+
+    let cancelled = false
+
+    const syncPaidState = async () => {
+      // Wait briefly so Firebase token + backend sync can finish after sign-in.
+      for (const waitMs of [0, 400, 1200]) {
+        if (waitMs) {
+          await new Promise((resolve) => window.setTimeout(resolve, waitMs))
+        }
+        if (cancelled) return
+        const paid = await refreshSubscription()
+        if (paid || cancelled) return
+      }
+    }
+
+    void syncPaidState()
+    return () => {
+      cancelled = true
+    }
+  }, [user?.uid])
 
   useEffect(() => {
     if (!showJoinForm) return undefined
@@ -818,10 +836,13 @@ export default function App() {
       setStatus('idle')
     } catch (error) {
       if (
+        error.alreadySubscribed ||
+        error.status === 409 ||
         String(error.message || '').toLowerCase().includes('permanent lifetime') ||
         String(error.message || '').toLowerCase().includes('already have')
       ) {
         setSubscriptionActive(true)
+        void refreshSubscription()
         openPaidLinksPopup()
         return
       }
