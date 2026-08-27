@@ -3,6 +3,8 @@ import { waitlistRouter } from './waitlist.js'
 import { authRouter } from './auth.js'
 import { paymentsRouter } from './payments.js'
 import { profileRouter } from './profile.js'
+import { adminRouter } from './admin.js'
+import { publicSettingsRouter } from './publicSettings.js'
 
 export const apiRouter = Router()
 
@@ -19,3 +21,5 @@ apiRouter.use('/auth', authRouter)
 apiRouter.use('/profile', profileRouter)
 apiRouter.use('/waitlist', waitlistRouter)
 apiRouter.use('/payments', paymentsRouter)
+apiRouter.use('/admin', adminRouter)
+apiRouter.use('/public/settings', publicSettingsRouter)

@@ -69,6 +69,12 @@ services:
         sync: false
       - key: LIFETIME_GRANT_EMAILS
         sync: false
+      - key: ADMIN_DASHBOARD_NAME
+        value: TredsDash
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_SESSION_SECRET
+        sync: false
 
   - type: cron
     name: bizvyapar-keepalive

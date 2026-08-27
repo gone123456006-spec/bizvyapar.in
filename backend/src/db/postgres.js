@@ -115,6 +115,15 @@ export async function initPostgres() {
       ADD COLUMN IF NOT EXISTS subscription_activated_at TIMESTAMPTZ
   `)
 
+  // Admin-editable runtime settings (webinar link + price)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+
   // Backfill existing paid profiles to lifetime (one-time permanent)
   await db.query(`
     UPDATE profiles

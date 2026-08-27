@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAuth, getAccessToken } from './context/AuthContext.jsx'
 import { apiUrl } from './lib/api.js'
+import { usePublicSettings } from './hooks/usePublicSettings.js'
 import './App.css'
 
 function CheckIcon({ className = 'review-check' }) {
@@ -218,6 +219,8 @@ function FieldIcon({ filled, children }) {
 
 export default function App() {
   const { user, signingIn, error, signInWithGoogle, signOut } = useAuth()
+  const publicSettings = usePublicSettings(4000)
+  const amountLabel = publicSettings.amountLabel || '₹1'
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
@@ -275,7 +278,8 @@ export default function App() {
         name: paidName,
         email: paidEmail,
         phone: paidPhone,
-        webinarLink: latest?.webinarLink || null,
+        webinarLink:
+          latest?.webinarLink || publicSettings.webinarLink || null,
         emailSent: true,
         emailError: null,
         subscriptionType: subscription?.type || 'lifetime',
@@ -548,7 +552,9 @@ export default function App() {
         handler: (response) => {
           const paymentId = response?.razorpay_payment_id || ''
           const fallbackLink = String(
-            import.meta.env.VITE_WEBINAR_LINK || '',
+            publicSettings.webinarLink ||
+              import.meta.env.VITE_WEBINAR_LINK ||
+              '',
           ).trim()
 
           // Show webinar success popup instantly — don't wait on verify/email.
@@ -1049,7 +1055,7 @@ export default function App() {
               </p>
 
               <p className="register-price">
-                Reserve Your Place — <strong>₹1</strong>
+                Reserve Your Place — <strong>{amountLabel}</strong>
               </p>
 
               <div className="spot-actions register-join-actions register-join-actions--desktop">
@@ -1147,7 +1153,7 @@ export default function App() {
                 </p>
               </div>
               <p className="register-price-under-video">
-                Reserve Your Place — <strong>₹1</strong>
+                Reserve Your Place — <strong>{amountLabel}</strong>
               </p>
             </div>
 
@@ -1364,10 +1370,10 @@ export default function App() {
                     </p>
                   ) : null}
 
-                  {submitted.webinarLink ? (
+                  {(publicSettings.webinarLink || submitted.webinarLink) ? (
                     <a
                       className="btn-trial"
-                      href={submitted.webinarLink}
+                      href={publicSettings.webinarLink || submitted.webinarLink}
                       target="_blank"
                       rel="noreferrer"
                     >
@@ -1422,7 +1428,7 @@ export default function App() {
 
                     <div className="payment-total">
                       <span>Live 30-Min Workshop</span>
-                      <strong>₹1</strong>
+                      <strong>{amountLabel}</strong>
                     </div>
                   </div>
 

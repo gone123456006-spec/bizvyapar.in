@@ -14,14 +14,13 @@ import {
   sendWebinarPaymentEmail,
 } from '../email.js'
 import { buildSubscription, isLifetimeActive } from '../subscription.js'
+import {
+  formatAmountLabel,
+  getWebinarLink,
+  getWorkshopAmountPaise,
+} from '../settingsStore.js'
 
 export const paymentsRouter = Router()
-
-const WORKSHOP_AMOUNT_PAISE = Number(process.env.WORKSHOP_AMOUNT_PAISE || 100)
-
-function getWebinarLink() {
-  return String(process.env.WEBINAR_LINK || '').trim()
-}
 
 function getRazorpay() {
   const keyId = process.env.RAZORPAY_KEY_ID
@@ -82,7 +81,11 @@ async function finalizePaidSeat({
   paymentId,
   sendEmail = true,
 }) {
-  const webinarLink = getWebinarLink()
+  const [webinarLink, amountPaise] = await Promise.all([
+    getWebinarLink(),
+    getWorkshopAmountPaise(),
+  ])
+  const amountLabel = formatAmountLabel(amountPaise)
 
   // Always bind to Firebase uid tenant (no guest split DB).
   await touchLogin({
@@ -110,7 +113,7 @@ async function finalizePaidSeat({
       phone: lead.phone,
       paymentId,
       orderId,
-      amount: WORKSHOP_AMOUNT_PAISE,
+      amount: amountPaise,
       webinarLink: webinarLink || null,
     },
   )
@@ -134,7 +137,7 @@ async function finalizePaidSeat({
       name: lead.name,
       paymentId,
       webinarLink,
-      amountLabel: '₹1',
+      amountLabel,
     }).catch((error) => {
       console.error('Failed to send webinar email:', error)
     })
@@ -183,9 +186,10 @@ paymentsRouter.post('/create-order', requireAuth, async (req, res, next) => {
 
     const { keyId, client } = getRazorpay()
     const receipt = `ev_${Date.now().toString(36)}`
+    const amountPaise = await getWorkshopAmountPaise()
 
     const order = await client.orders.create({
-      amount: WORKSHOP_AMOUNT_PAISE,
+      amount: amountPaise,
       currency: 'INR',
       receipt,
       notes: {
@@ -204,6 +208,7 @@ paymentsRouter.post('/create-order', requireAuth, async (req, res, next) => {
       orderId: order.id,
       amount: order.amount,
       currency: order.currency,
+      amountLabel: formatAmountLabel(order.amount),
       name: lead.name,
       email: lead.email,
       phone: lead.phone,
@@ -245,11 +250,12 @@ paymentsRouter.post('/verify', requireAuth, async (req, res, next) => {
     // Idempotent short-circuit before rewrite/email.
     const existing = await findPaymentAnywhere(paymentId)
     if (existing) {
+      const liveLink = (await getWebinarLink()) || existing.webinarLink || null
       return res.status(200).json({
         message:
           'Your payment is already confirmed. Now you are in for the Webinar.',
         paymentId,
-        webinarLink: existing.webinarLink || getWebinarLink() || null,
+        webinarLink: liveLink,
         emailSent: false,
         emailError: null,
         alreadyRecorded: true,
