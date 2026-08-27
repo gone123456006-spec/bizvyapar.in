@@ -8,13 +8,6 @@ import './App.css'
 const WHATSAPP_SUPPORT_PHONE = '919153832948'
 const WHATSAPP_CHANNEL_URL =
   'https://whatsapp.com/channel/0029Vb8bHENHQbRzGerkML0N'
-const WHATSAPP_SUBSCRIPTION_MESSAGE =
-  'Hi, I bought the BizVyapar subscription. Excited to join the webinar!'
-
-function getWhatsAppSubscriptionChatHref() {
-  const text = `${WHATSAPP_SUBSCRIPTION_MESSAGE}\n\nJoin channel: ${WHATSAPP_CHANNEL_URL}`
-  return `https://wa.me/${WHATSAPP_SUPPORT_PHONE}?text=${encodeURIComponent(text)}`
-}
 
 function CheckIcon({ className = 'review-check' }) {
   return (
@@ -1080,7 +1073,7 @@ export default function App() {
                     <>
                       <a
                         className="profile-menu-item profile-menu-link"
-                        href={getWhatsAppSubscriptionChatHref()}
+                        href={WHATSAPP_CHANNEL_URL}
                         target="_blank"
                         rel="noreferrer"
                         role="menuitem"
@@ -1696,7 +1689,7 @@ export default function App() {
 
                   <a
                     className="btn-trial btn-whatsapp-channel"
-                    href={getWhatsAppSubscriptionChatHref()}
+                    href={WHATSAPP_CHANNEL_URL}
                     target="_blank"
                     rel="noreferrer"
                   >
