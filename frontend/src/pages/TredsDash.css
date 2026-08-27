@@ -32,19 +32,21 @@
   grid-template-columns: 260px 1fr;
   background: var(--td-surface);
   overflow-x: hidden;
+  align-items: start;
 }
 
 .td-sidebar {
   position: sticky;
   top: 0;
   height: 100svh;
+  align-self: start;
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 20px 16px;
   background: linear-gradient(180deg, #123325 0%, #0f2a1c 100%);
   color: #edf7f1;
-  z-index: 30;
+  z-index: 40;
 }
 
 .td-sidebar-brand h1 {
@@ -106,6 +108,65 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+  min-height: 100svh;
+}
+
+.td-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 35;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  background: rgba(244, 248, 245, 0.96);
+  border-bottom: 1px solid var(--td-line);
+  backdrop-filter: blur(10px);
+}
+
+.td-topbar-copy .td-kicker {
+  color: var(--td-green);
+}
+
+.td-topbar-copy strong {
+  display: block;
+  font-size: 1.05rem;
+}
+
+.td-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.td-link--dark {
+  color: var(--td-green-strong);
+}
+
+.td-btn--compact {
+  margin-top: 0;
+  padding: 10px 14px;
+  min-height: 40px;
+}
+
+.td-icon-btn--menu {
+  display: none;
+}
+
+.td-icon-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--td-green-soft);
+  color: var(--td-green-strong);
+  font-size: 1.2rem;
+}
+
+.td-payment-block {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
 }
 
 .td-content {
@@ -529,26 +590,21 @@
   }
 
   .td-mobile-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    padding: 12px 14px;
-    background: rgba(244, 248, 245, 0.96);
-    backdrop-filter: blur(8px);
-    border-bottom: 1px solid var(--td-line);
+    display: none;
   }
 
-  .td-icon-btn {
-    width: 44px;
-    height: 44px;
-    border-radius: 12px;
-    background: var(--td-green-soft);
-    color: var(--td-green-strong);
-    font-size: 1.2rem;
+  .td-icon-btn--menu {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .td-topbar {
+    padding: 10px 14px;
+  }
+
+  .td-topbar-actions .td-link--dark {
+    display: none;
   }
 
   .td-bottom-nav {
@@ -558,7 +614,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    z-index: 15;
+    z-index: 45;
     gap: 2px;
     padding: 8px 6px calc(8px + env(safe-area-inset-bottom));
     background: rgba(255, 255, 255, 0.96);

@@ -19,6 +19,7 @@ const NAV = [
   { id: 'overview', label: 'Overview', group: 'Dashboard' },
   { id: 'users', label: 'Registered Users', group: 'Users' },
   { id: 'active-users', label: 'Active Users', group: 'Users' },
+  { id: 'subscribers', label: 'Subscribed Users', group: 'Users' },
   { id: 'visitors', label: 'Visitor Overview', group: 'Visitors' },
   { id: 'reports', label: 'Exports', group: 'Reports' },
   { id: 'settings', label: 'Settings', group: 'Settings' },
@@ -27,8 +28,8 @@ const NAV = [
 const BOTTOM = [
   { id: 'overview', label: 'Home' },
   { id: 'users', label: 'Users' },
+  { id: 'subscribers', label: 'Paid' },
   { id: 'visitors', label: 'Visitors' },
-  { id: 'reports', label: 'Reports' },
   { id: 'settings', label: 'Settings' },
 ]
 
@@ -180,19 +181,27 @@ export default function TredsDash() {
       ) : null}
 
       <div className="td-main">
-        <header className="td-mobile-bar">
+        <header className="td-topbar">
           <button
             type="button"
-            className="td-icon-btn"
+            className="td-icon-btn td-icon-btn--menu"
             aria-label="Open menu"
             onClick={() => setNavOpen(true)}
           >
             ☰
           </button>
-          <strong>TredsDash</strong>
-          <button type="button" className="td-icon-btn" onClick={logout} aria-label="Sign out">
-            ⎋
-          </button>
+          <div className="td-topbar-copy">
+            <p className="td-kicker">BizVyapar Admin</p>
+            <strong>TredsDash</strong>
+          </div>
+          <div className="td-topbar-actions">
+            <a className="td-link td-link--dark" href="/">
+              Website
+            </a>
+            <button type="button" className="td-btn td-btn--ghost td-btn--compact" onClick={logout}>
+              Sign out
+            </button>
+          </div>
         </header>
 
         <main className="td-content">
@@ -215,6 +224,23 @@ export default function TredsDash() {
               onAuthError={onAuthError}
               onOpenUser={setSelectedUserId}
               initialStatus={section === 'active-users' ? 'active' : 'all'}
+              title={section === 'active-users' ? 'Active Users' : 'Registered Users'}
+              subtitle={
+                section === 'active-users'
+                  ? 'Users active in the last 72 hours'
+                  : null
+              }
+            />
+          ) : null}
+
+          {!selectedUserId && section === 'subscribers' ? (
+            <RegisteredUsersSection
+              token={token}
+              onAuthError={onAuthError}
+              onOpenUser={setSelectedUserId}
+              initialStatus="subscribed"
+              title="Subscribed Users"
+              subtitle="Users who bought a subscription — with payment details"
             />
           ) : null}
 

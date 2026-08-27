@@ -60,16 +60,11 @@ export function formatDate(value) {
   }
 }
 
-export function formatDay(value) {
-  if (!value) return '—'
-  try {
-    return new Date(value).toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-    })
-  } catch {
-    return String(value)
-  }
+export function formatAmount(paise) {
+  const value = Number(paise) / 100
+  if (!Number.isFinite(value)) return '—'
+  if (Number.isInteger(value)) return `₹${value}`
+  return `₹${value.toFixed(2)}`
 }
 
 export async function downloadUsersExport(token, { preset, from, to } = {}) {

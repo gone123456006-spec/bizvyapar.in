@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { adminFetch, downloadUsersExport, formatDate } from './adminApi.js'
+import { adminFetch, downloadUsersExport, formatAmount, formatDate } from './adminApi.js'
 import { Pagination, SparkBars, StatCards } from './ui.jsx'
 
 export function OverviewSection({ token, onAuthError }) {
@@ -101,11 +101,13 @@ export function RegisteredUsersSection({
   onAuthError,
   onOpenUser,
   initialStatus = 'all',
+  title = 'Registered Users',
+  subtitle = null,
 }) {
   const [data, setData] = useState({ users: [], page: 1, totalPages: 1, total: 0 })
   const [q, setQ] = useState('')
   const [status, setStatus] = useState(initialStatus)
-  const [sort, setSort] = useState('newest')
+  const [sort, setSort] = useState(initialStatus === 'subscribed' ? 'paid' : 'newest')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [page, setPage] = useState(1)
@@ -114,6 +116,7 @@ export function RegisteredUsersSection({
 
   useEffect(() => {
     setStatus(initialStatus)
+    setSort(initialStatus === 'subscribed' ? 'paid' : 'newest')
     setPage(1)
   }, [initialStatus])
 
@@ -144,13 +147,20 @@ export function RegisteredUsersSection({
     void load()
   }, [load])
 
+  const showPayments = initialStatus === 'subscribed' || status === 'subscribed'
+
   return (
     <div className="td-section">
       <div className="td-section-head">
         <div>
-          <h2>Registered Users</h2>
-          <p className="td-muted">{data.total || 0} signed-in accounts</p>
+          <h2>{title}</h2>
+          <p className="td-muted">
+            {subtitle || `${data.total || 0} signed-in accounts`}
+          </p>
         </div>
+        <button type="button" className="td-btn td-btn--ghost" onClick={() => void load()}>
+          Refresh
+        </button>
       </div>
 
       <div className="td-filters">
@@ -164,18 +174,21 @@ export function RegisteredUsersSection({
             setQ(e.target.value)
           }}
         />
-        <select
-          className="td-input"
-          value={status}
-          onChange={(e) => {
-            setPage(1)
-            setStatus(e.target.value)
-          }}
-        >
-          <option value="all">All activity</option>
-          <option value="active">Active</option>
-          <option value="inactive">Inactive</option>
-        </select>
+        {initialStatus !== 'subscribed' ? (
+          <select
+            className="td-input"
+            value={status}
+            onChange={(e) => {
+              setPage(1)
+              setStatus(e.target.value)
+            }}
+          >
+            <option value="all">All activity</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+            <option value="subscribed">Subscribed / Paid</option>
+          </select>
+        ) : null}
         <select
           className="td-input"
           value={sort}
@@ -184,6 +197,7 @@ export function RegisteredUsersSection({
           <option value="newest">Newest first</option>
           <option value="oldest">Oldest first</option>
           <option value="last_login">Last login</option>
+          <option value="paid">Latest payment</option>
         </select>
         <input
           className="td-input"
@@ -221,16 +235,50 @@ export function RegisteredUsersSection({
               <strong>{user.name || '—'}</strong>
               <span>{user.email || '—'}</span>
               <span>{user.phone || 'No phone'}</span>
+              <span
+                className={
+                  user.subscriptionStatus === 'active'
+                    ? 'td-badge td-badge--active'
+                    : 'td-badge'
+                }
+              >
+                {user.subscriptionStatus === 'active'
+                  ? `Subscription: Active${user.subscriptionType ? ` (${user.subscriptionType})` : ''}`
+                  : 'No active subscription'}
+              </span>
             </div>
             <div>
-              <span className={user.activityStatus === 'active' ? 'td-badge td-badge--active' : 'td-badge'}>
+              <span
+                className={
+                  user.activityStatus === 'active' ? 'td-badge td-badge--active' : 'td-badge'
+                }
+              >
                 {user.activityStatus}
               </span>
-              <span className="td-meta">Joined {formatDate(user.createdAt)}</span>
-              <span className="td-meta">Last login {formatDate(user.lastLoginAt)}</span>
-              <span className="td-meta">
-                {user.loginCount || 0} logins · {user.lastDevice || '—'} / {user.lastBrowser || '—'}
-              </span>
+              {showPayments || user.payment ? (
+                <div className="td-payment-block">
+                  <strong>{formatAmount(user.payment?.amount)}</strong>
+                  <span className="td-meta">
+                    Paid {formatDate(user.payment?.paidAt || user.subscriptionActivatedAt)}
+                  </span>
+                  <span className="td-mono">{user.payment?.paymentId || 'No payment id'}</span>
+                  {user.payment?.orderId ? (
+                    <span className="td-meta">Order {user.payment.orderId}</span>
+                  ) : null}
+                  <span className="td-meta">
+                    {user.paymentCount || 0} payment{(user.paymentCount || 0) === 1 ? '' : 's'}
+                  </span>
+                </div>
+              ) : (
+                <>
+                  <span className="td-meta">Joined {formatDate(user.createdAt)}</span>
+                  <span className="td-meta">Last login {formatDate(user.lastLoginAt)}</span>
+                  <span className="td-meta">
+                    {user.loginCount || 0} logins · {user.lastDevice || '—'} /{' '}
+                    {user.lastBrowser || '—'}
+                  </span>
+                </>
+              )}
             </div>
           </button>
         ))}
@@ -300,8 +348,35 @@ export function UserDetailSection({ token, tenantId, onBack, onAuthError }) {
             <div><dt>Logins</dt><dd>{u.loginCount || 0}</dd></div>
             <div><dt>Device</dt><dd>{u.lastDevice || '—'}</dd></div>
             <div><dt>Browser</dt><dd>{u.lastBrowser || '—'}</dd></div>
-            <div><dt>Subscription</dt><dd>{u.subscriptionStatus || 'none'} / {u.subscriptionType || '—'}</dd></div>
+            <div>
+              <dt>Subscription</dt>
+              <dd>
+                {u.subscriptionStatus || 'none'}
+                {u.subscriptionType ? ` / ${u.subscriptionType}` : ''}
+              </dd>
+            </div>
+            <div>
+              <dt>Activated</dt>
+              <dd>{formatDate(u.subscriptionActivatedAt)}</dd>
+            </div>
           </dl>
+        </div>
+        <div className="td-card">
+          <h3>Payment details</h3>
+          <div className="td-card-list td-card-list--compact">
+            {(detail.payments || []).map((p) => (
+              <div className="td-mini-row" key={p.paymentId}>
+                <strong>{formatAmount(p.amount)}</strong>
+                <span className="td-badge td-badge--active">{p.status || 'paid'}</span>
+                <span className="td-mono">{p.paymentId}</span>
+                {p.orderId ? <span className="td-meta">Order {p.orderId}</span> : null}
+                <span className="td-meta">Paid {formatDate(p.paidAt)}</span>
+              </div>
+            ))}
+            {!detail.payments?.length ? (
+              <p className="td-muted">No payments on this account.</p>
+            ) : null}
+          </div>
         </div>
         <div className="td-card">
           <h3>Sessions</h3>

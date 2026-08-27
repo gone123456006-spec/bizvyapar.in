@@ -679,6 +679,15 @@ export async function listRegisteredUsersAdmin({
     where.push(`p.last_login_at >= NOW() - INTERVAL '72 hours'`)
   } else if (status === 'inactive') {
     where.push(`(p.last_login_at IS NULL OR p.last_login_at < NOW() - INTERVAL '72 hours')`)
+  } else if (status === 'subscribed') {
+    where.push(`(
+      p.subscription_status = 'active'
+      OR p.status = 'paid'
+      OR EXISTS (
+        SELECT 1 FROM payments pay
+        WHERE pay.tenant_id = p.tenant_id AND pay.status = 'paid'
+      )
+    )`)
   }
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
@@ -687,7 +696,9 @@ export async function listRegisteredUsersAdmin({
       ? 'ORDER BY p.created_at ASC NULLS LAST'
       : sort === 'last_login'
         ? 'ORDER BY p.last_login_at DESC NULLS LAST'
-        : 'ORDER BY p.created_at DESC NULLS LAST'
+        : sort === 'paid'
+          ? 'ORDER BY latest_paid_at DESC NULLS LAST'
+          : 'ORDER BY p.created_at DESC NULLS LAST'
 
   const countResult = await db.query(
     `SELECT COUNT(*)::int AS c FROM profiles p ${whereSql}`,
@@ -699,8 +710,22 @@ export async function listRegisteredUsersAdmin({
   const result = await db.query(
     `SELECT p.*,
             (SELECT COUNT(*)::int FROM user_sessions us WHERE us.tenant_id = p.tenant_id) AS session_count,
-            (SELECT COUNT(*)::int FROM payments pay WHERE pay.tenant_id = p.tenant_id AND pay.status = 'paid') AS payment_count
+            (SELECT COUNT(*)::int FROM payments pay WHERE pay.tenant_id = p.tenant_id AND pay.status = 'paid') AS payment_count,
+            lp.payment_id AS latest_payment_id,
+            lp.order_id AS latest_order_id,
+            lp.amount AS latest_amount,
+            lp.currency AS latest_currency,
+            lp.status AS latest_payment_status,
+            lp.paid_at AS latest_paid_at,
+            lp.webinar_link AS latest_webinar_link
      FROM profiles p
+     LEFT JOIN LATERAL (
+       SELECT payment_id, order_id, amount, currency, status, paid_at, webinar_link
+       FROM payments
+       WHERE tenant_id = p.tenant_id AND status = 'paid'
+       ORDER BY paid_at DESC
+       LIMIT 1
+     ) lp ON TRUE
      ${whereSql}
      ${orderSql}
      LIMIT $${params.length - 1} OFFSET $${params.length}`,
@@ -709,6 +734,10 @@ export async function listRegisteredUsersAdmin({
 
   const users = result.rows.map((row) => {
     const active = isActiveRecently(row.last_login_at, 72)
+    const subscribed =
+      row.subscription_status === 'active' ||
+      row.status === 'paid' ||
+      Number(row.payment_count || 0) > 0
     return {
       tenantId: row.tenant_id,
       name: row.name,
@@ -720,9 +749,9 @@ export async function listRegisteredUsersAdmin({
       picture: row.picture,
       status: row.status,
       activityStatus: active ? 'active' : 'inactive',
-      subscriptionStatus: row.subscription_status || 'none',
-      subscriptionType: row.subscription_type || null,
-      subscriptionActivatedAt: row.subscription_activated_at || null,
+      subscriptionStatus: subscribed ? 'active' : row.subscription_status || 'none',
+      subscriptionType: row.subscription_type || (subscribed ? 'lifetime' : null),
+      subscriptionActivatedAt: row.subscription_activated_at || row.latest_paid_at || null,
       createdAt: row.created_at,
       lastLoginAt: row.last_login_at,
       loginCount: row.login_count || row.session_count || 0,
@@ -731,6 +760,17 @@ export async function listRegisteredUsersAdmin({
       lastDevice: row.last_device || null,
       lastBrowser: row.last_browser || null,
       lastUserAgent: row.last_user_agent || null,
+      payment: row.latest_payment_id
+        ? {
+            paymentId: row.latest_payment_id,
+            orderId: row.latest_order_id,
+            amount: row.latest_amount,
+            currency: row.latest_currency || 'INR',
+            status: row.latest_payment_status,
+            paidAt: row.latest_paid_at,
+            webinarLink: row.latest_webinar_link,
+          }
+        : null,
     }
   })
 
@@ -797,9 +837,12 @@ export async function getRegisteredUserDetail(tenantId) {
     })),
     payments: payments.rows.map((p) => ({
       paymentId: p.payment_id,
+      orderId: p.order_id,
       amount: p.amount,
+      currency: p.currency || 'INR',
       status: p.status,
       paidAt: p.paid_at,
+      webinarLink: p.webinar_link,
     })),
   }
 }
