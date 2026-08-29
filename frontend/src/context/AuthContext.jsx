@@ -239,7 +239,7 @@ export function AuthProvider({ children }) {
             res.status === 404
               ? 'Please try again in a moment.'
               : res.status === 409
-                ? 'This email is already registered. Try signing in.'
+                ? 'This email is already registered. Use the same name and mobile to sign in.'
                 : 'Something went wrong. Please try again.',
           ),
         )
@@ -267,12 +267,17 @@ export function AuthProvider({ children }) {
     }
   }
 
-  async function register({ name, email, password, phone }) {
-    return authRequest('/api/auth/register', { name, email, password, phone })
+  async function register({ name, email, phone }) {
+    return authRequest('/api/auth/register', { name, email, phone })
   }
 
-  async function login({ email, password }) {
-    return authRequest('/api/auth/login', { email, password })
+  async function login({ name, email, phone }) {
+    return authRequest('/api/auth/login', { name, email, phone })
+  }
+
+  /** Same as login/register — name + email + phone */
+  async function signInWithDetails({ name, email, phone }) {
+    return authRequest('/api/auth/login', { name, email, phone })
   }
 
   async function signOut() {
@@ -308,6 +313,7 @@ export function AuthProvider({ children }) {
       error,
       register,
       login,
+      signInWithDetails,
       signOut,
       refreshProfile,
       refreshAccessToken,

@@ -2,13 +2,12 @@ import { Router } from 'express'
 import { requireAuth } from '../db/authMiddleware.js'
 import { authRateLimit } from '../auth/rateLimit.js'
 import {
-  authenticateUser,
   getSubscriptionByUserId,
   issueTokenPair,
-  registerUser,
   revokeAllRefreshTokensForUser,
   revokeRefreshToken,
   rotateRefreshToken,
+  signInWithDetails,
   updateUserProfile,
 } from '../auth/userStore.js'
 import {
@@ -70,19 +69,17 @@ function publicUser(user, tenantId, subscription) {
 authRouter.get('/status', (_req, res) => {
   res.json({
     configured: true,
-    provider: 'email-password',
+    provider: 'name-email-phone',
     accessTokenTtl: process.env.ACCESS_TOKEN_TTL || '15m',
     isolation: 'per-user-database',
   })
 })
 
-/** POST /api/auth/register — Name + Email + Password (+ optional phone) */
-authRouter.post('/register', authRateLimit(), async (req, res) => {
+async function completeAuth(req, res) {
   try {
-    const { user, tenantId } = await registerUser({
+    const { user, tenantId, created } = await signInWithDetails({
       name: req.body?.name,
       email: req.body?.email,
-      password: req.body?.password,
       phone: req.body?.phone,
     })
 
@@ -107,8 +104,8 @@ authRouter.post('/register', authRateLimit(), async (req, res) => {
       void linkVisitorToTenant(visitorId, tenantId).catch(() => undefined)
     }
 
-    return res.status(201).json({
-      message: 'Account created.',
+    return res.status(created ? 201 : 200).json({
+      message: created ? 'Account created.' : 'Signed in.',
       user: publicUser(user, tenantId, subscription),
       subscription,
       accessToken: tokens.accessToken,
@@ -116,65 +113,20 @@ authRouter.post('/register', authRateLimit(), async (req, res) => {
       expiresIn: tokens.expiresIn,
     })
   } catch (error) {
-    console.error('Register failed:', error.message)
+    console.error('Auth failed:', error.message)
     const facing = userFacingAuthError(
       error,
-      'Could not create account. Please try again.',
+      'Could not sign in. Check your name, email, and mobile.',
     )
     return res.status(facing.status).json({ message: facing.message })
   }
-})
+}
 
-/** POST /api/auth/login — Email + Password only */
-authRouter.post('/login', authRateLimit(), async (req, res) => {
-  try {
-    const { user, tenantId } = await authenticateUser({
-      email: req.body?.email,
-      password: req.body?.password,
-    })
-    const [tokens, subscription] = await Promise.all([
-      issueTokenPair(user, {
-        userAgent: req.headers['user-agent'],
-        ip: clientIp(req),
-      }),
-      getSubscriptionByUserId(user.id),
-    ])
+/** POST /api/auth/register — Name + Email + Phone */
+authRouter.post('/register', authRateLimit(), completeAuth)
 
-    const sessionId = String(req.body?.sessionId || '').trim() || undefined
-    const visitorId = String(req.body?.visitorId || '').trim() || null
-    void recordUserLoginSession({
-      tenantId,
-      sessionId,
-      userAgent: req.headers['user-agent'],
-      ip: clientIp(req),
-      path: '/',
-    }).catch(() => undefined)
-    if (visitorId) {
-      void linkVisitorToTenant(visitorId, tenantId).catch(() => undefined)
-    }
-
-    return res.json({
-      message: 'Signed in.',
-      user: publicUser(user, tenantId, subscription),
-      subscription,
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-      expiresIn: tokens.expiresIn,
-    })
-  } catch (error) {
-    if (error?.status === 423) {
-      return res.status(423).json({
-        message: 'Too many attempts. Try again later.',
-      })
-    }
-    const facing = userFacingAuthError(error, 'Invalid email or password.')
-    // Always generic for failed login (no email-enumeration)
-    if (facing.status === 401 || facing.status === 500) {
-      return res.status(401).json({ message: 'Invalid email or password.' })
-    }
-    return res.status(facing.status).json({ message: facing.message })
-  }
-})
+/** POST /api/auth/login — Name + Email + Phone (exact match → same userId + subscription) */
+authRouter.post('/login', authRateLimit(), completeAuth)
 
 /** POST /api/auth/refresh — rotate refresh token, issue new access token */
 authRouter.post('/refresh', authRateLimit({ maxPerIp: 60 }), async (req, res) => {

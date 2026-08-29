@@ -187,6 +187,11 @@ export async function initPostgres() {
     CREATE INDEX IF NOT EXISTS subscriptions_status_idx ON subscriptions(status);
   `)
 
+  // Passwordless name+email+phone accounts
+  await db.query(`
+    ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL
+  `).catch(() => undefined)
+
   // Backfill lifetime subscriptions from paid profiles (uid matches users.id)
   await db.query(`
     INSERT INTO subscriptions (id, user_id, plan, status, expires_at, activated_at, created_at, updated_at)

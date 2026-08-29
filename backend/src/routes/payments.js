@@ -59,11 +59,11 @@ function validateLead(body) {
   }
 
   const digits = phone.replace(/\D/g, '')
-  if (digits && digits.length !== 10) {
+  if (digits.length !== 10) {
     return { error: 'Please enter a valid 10-digit mobile number.' }
   }
 
-  return { name, email, phone: digits || null }
+  return { name, email, phone: digits }
 }
 
 function assertAuthEmail(auth, email) {

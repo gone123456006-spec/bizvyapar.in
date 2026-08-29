@@ -403,13 +403,12 @@ function FieldIcon({ filled, children }) {
 
 export default function App() {
   const navigate = useNavigate()
-  const { user, signingIn, register, login, signOut, refreshProfile } =
+  const { user, signingIn, signInWithDetails, signOut, refreshProfile } =
     useAuth()
   const publicSettings = usePublicSettings(4000)
   const amountLabel = publicSettings.amountLabel || '₹1'
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
   const [phone, setPhone] = useState('')
   const [consent, setConsent] = useState(true)
   const [status, setStatus] = useState('idle')
@@ -663,7 +662,6 @@ export default function App() {
       return
     }
 
-    setPassword('')
     setJoinStep('details')
     setStatus('idle')
     setSubmitted(null)
@@ -694,7 +692,6 @@ export default function App() {
       return
     }
 
-    setPassword('')
     setJoinStep('login')
     setStatus('idle')
     setSubmitted(null)
@@ -750,15 +747,9 @@ export default function App() {
     }
 
     const digits = phone.replace(/\D/g, '')
-    if (digits && digits.length !== 10) {
+    if (digits.length !== 10) {
       setStatus('error')
       setMessage('Please enter a valid 10-digit mobile number.')
-      return
-    }
-
-    if (!user && password.length < 8) {
-      setStatus('error')
-      setMessage('Password must be at least 8 characters.')
       return
     }
 
@@ -771,12 +762,11 @@ export default function App() {
     try {
       let activeUser = user
       if (!activeUser) {
-        setMessage('Creating your account…')
-        activeUser = await register({
+        setMessage('Saving your details…')
+        activeUser = await signInWithDetails({
           name: name.trim(),
           email: email.trim(),
-          password,
-          phone: digits || undefined,
+          phone: digits,
         })
       }
 
@@ -790,7 +780,6 @@ export default function App() {
 
       setStatus('idle')
       setMessage('')
-      setPassword('')
       setJoinStep('payment')
       pendingOrderRef.current = createPaymentOrder({
         name: lockedName,
@@ -799,7 +788,7 @@ export default function App() {
       })
     } catch (err) {
       setStatus('error')
-      setMessage(err.message || 'Could not create account. Please try again.')
+      setMessage(err.message || 'Could not save your details. Please try again.')
     }
   }
 
@@ -808,29 +797,35 @@ export default function App() {
     setStatus('loading')
     setMessage('')
 
+    if (!name.trim()) {
+      setStatus('error')
+      setMessage('Please enter your name.')
+      return
+    }
     if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       setStatus('error')
       setMessage('Please enter a valid email.')
       return
     }
-    if (!password) {
+    const digits = phone.replace(/\D/g, '')
+    if (digits.length !== 10) {
       setStatus('error')
-      setMessage('Please enter your password.')
+      setMessage('Please enter a valid 10-digit mobile number.')
       return
     }
 
     try {
       setMessage('Signing in…')
-      const activeUser = await login({
+      const activeUser = await signInWithDetails({
+        name: name.trim(),
         email: email.trim(),
-        password,
+        phone: digits,
       })
       setName(activeUser.name || name)
       setEmail(activeUser.email || email)
       if (activeUser.phone) {
         setPhone(String(activeUser.phone).replace(/\D/g, '').slice(-10))
       }
-      setPassword('')
 
       const paid =
         (activeUser.subscription?.status === 'active' &&
@@ -848,7 +843,10 @@ export default function App() {
       void refreshProfile()
     } catch (err) {
       setStatus('error')
-      setMessage(err.message || 'Invalid email or password.')
+      setMessage(
+        err.message ||
+          'Could not sign in. Use the same name, email, and mobile.',
+      )
     }
   }
 
@@ -1904,17 +1902,35 @@ export default function App() {
                 <>
                   <h2 id="join-form-title">Sign in</h2>
                   <p className="join-sub">
-                    Use your email and password to access your account.
+                    Enter the same name, Gmail, and mobile you used before.
                   </p>
 
                   <form className="join-form" onSubmit={handleLoginSubmit} noValidate>
+                    <label className="pill-field">
+                      <span className="sr-only">Name</span>
+                      <input
+                        type="text"
+                        name="name"
+                        autoComplete="name"
+                        placeholder="Name"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        required
+                      />
+                      <FieldIcon filled={name.trim().length > 0}>
+                        <svg viewBox="0 0 24 24" focusable="false">
+                          <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+                        </svg>
+                      </FieldIcon>
+                    </label>
+
                     <label className="pill-field">
                       <span className="sr-only">Email</span>
                       <input
                         type="email"
                         name="email"
                         autoComplete="email"
-                        placeholder="Email"
+                        placeholder="Email / Gmail"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         required
@@ -1926,20 +1942,24 @@ export default function App() {
                       </FieldIcon>
                     </label>
 
-                    <label className="pill-field">
-                      <span className="sr-only">Password</span>
+                    <label className="pill-field pill-phone">
+                      <span className="phone-label">Phone</span>
+                      <span className="phone-prefix" aria-hidden="true">
+                        <span className="flag" />
+                        +91
+                      </span>
                       <input
-                        type="password"
-                        name="password"
-                        autoComplete="current-password"
-                        placeholder="Password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
+                        type="tel"
+                        name="phone"
+                        autoComplete="tel"
+                        placeholder="10-digit mobile"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
                         required
                       />
-                      <FieldIcon filled={password.length > 0}>
+                      <FieldIcon filled={phone.trim().length > 0}>
                         <svg viewBox="0 0 24 24" focusable="false">
-                          <path d="M12 17a2 2 0 100-4 2 2 0 000 4zm6-6h-1V9a5 5 0 00-10 0v2H6a2 2 0 00-2 2v7a2 2 0 002 2h12a2 2 0 002-2v-7a2 2 0 00-2-2zm-3 0H9V9a3 3 0 016 0v2z" />
+                          <path d="M6.62 10.79a15.15 15.15 0 006.59 6.59l2.2-2.2a1 1 0 011.01-.24c1.12.37 2.33.57 3.58.57a1 1 0 011 1V20a1 1 0 01-1 1C10.4 21 3 13.6 3 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.25 1.02l-2.2 2.2z" />
                         </svg>
                       </FieldIcon>
                     </label>
@@ -1967,7 +1987,6 @@ export default function App() {
                         onClick={() => {
                           setStatus('idle')
                           setMessage('')
-                          setPassword('')
                           setJoinStep('details')
                         }}
                       >
@@ -1978,9 +1997,9 @@ export default function App() {
                 </>
               ) : (
                 <>
-                  <h2 id="join-form-title">Create your account</h2>
+                  <h2 id="join-form-title">Reserve your seat</h2>
                   <p className="join-sub">
-                    Register with email and password. Phone is optional.
+                    Enter your name, Gmail, and mobile number.
                   </p>
 
                   <form className="join-form" onSubmit={handleDetailsNext} noValidate>
@@ -2020,25 +2039,6 @@ export default function App() {
                       </FieldIcon>
                     </label>
 
-                    <label className="pill-field">
-                      <span className="sr-only">Password</span>
-                      <input
-                        type="password"
-                        name="password"
-                        autoComplete="new-password"
-                        placeholder="Password (min 8 characters)"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        required
-                        minLength={8}
-                      />
-                      <FieldIcon filled={password.length >= 8}>
-                        <svg viewBox="0 0 24 24" focusable="false">
-                          <path d="M12 17a2 2 0 100-4 2 2 0 000 4zm6-6h-1V9a5 5 0 00-10 0v2H6a2 2 0 00-2 2v7a2 2 0 002 2h12a2 2 0 002-2v-7a2 2 0 00-2-2zm-3 0H9V9a3 3 0 016 0v2z" />
-                        </svg>
-                      </FieldIcon>
-                    </label>
-
                     <label className="pill-field pill-phone">
                       <span className="phone-label">Phone</span>
                       <span className="phone-prefix" aria-hidden="true">
@@ -2049,7 +2049,8 @@ export default function App() {
                         type="tel"
                         name="phone"
                         autoComplete="tel"
-                        placeholder="Optional"
+                        placeholder="10-digit mobile"
+                        required
                         value={phone}
                         onChange={(e) => setPhone(e.target.value)}
                       />
@@ -2086,12 +2087,12 @@ export default function App() {
                       disabled={status === 'loading' || signingIn}
                     >
                       {status === 'loading' || signingIn
-                        ? 'Creating account…'
+                        ? 'Please wait…'
                         : 'Next >'}
                     </button>
 
                     <p className="form-note">
-                      Already have an account?{' '}
+                      Already joined?{' '}
                       <button
                         type="button"
                         className="form-terms-link"
@@ -2099,7 +2100,6 @@ export default function App() {
                         onClick={() => {
                           setStatus('idle')
                           setMessage('')
-                          setPassword('')
                           setJoinStep('login')
                         }}
                       >

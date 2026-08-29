@@ -4,7 +4,6 @@
  */
 import { randomUUID } from 'node:crypto'
 import { getPool, isPostgresEnabled } from '../db/postgres.js'
-import { hashPassword, verifyPassword } from './password.js'
 import {
   createRefreshTokenRaw,
   hashToken,
@@ -32,6 +31,34 @@ function sanitizeName(name) {
     .trim()
     .replace(/\s+/g, ' ')
     .slice(0, 120)
+}
+
+function namesMatch(a, b) {
+  return sanitizeName(a).toLowerCase() === sanitizeName(b).toLowerCase()
+}
+
+function validateIdentity({ name, email, phone }) {
+  const cleanName = sanitizeName(name)
+  const cleanEmail = normalizeEmail(email)
+  const cleanPhone = normalizePhone(phone)
+
+  if (!cleanName || cleanName.length < 2) {
+    const error = new Error('Please enter your full name.')
+    error.status = 400
+    throw error
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    const error = new Error('Please enter a valid email address.')
+    error.status = 400
+    throw error
+  }
+  if (!cleanPhone || cleanPhone.length !== 10) {
+    const error = new Error('Please enter a valid 10-digit mobile number.')
+    error.status = 400
+    throw error
+  }
+
+  return { cleanName, cleanEmail, cleanPhone }
 }
 
 function mapUser(row) {
@@ -75,7 +102,7 @@ function mapSubscription(row) {
 export function assertPostgres() {
   if (!isPostgresEnabled()) {
     const error = new Error(
-      'Secure auth requires DATABASE_URL (Postgres). File tenants are not supported for password accounts.',
+      'Auth requires DATABASE_URL (Postgres) for permanent accounts.',
     )
     error.status = 503
     throw error
@@ -225,27 +252,55 @@ async function upsertProfileForTenant(db, tenantId, { email, userId, name, phone
   )
 }
 
-export async function registerUser({ name, email, password, phone }) {
+/**
+ * Name + Email + Phone auth (no password).
+ * - New email → create permanent random UUID userId + empty subscription
+ * - Existing email + exact same name + phone → same userId + subscription
+ * - Existing email but name/phone differ → reject (do not create new account)
+ */
+export async function signInWithDetails({ name, email, phone }) {
   assertPostgres()
-  const cleanName = sanitizeName(name)
-  const cleanEmail = normalizeEmail(email)
-  const cleanPhone = normalizePhone(phone)
+  const { cleanName, cleanEmail, cleanPhone } = validateIdentity({
+    name,
+    email,
+    phone,
+  })
 
-  if (!cleanName || cleanName.length < 2) {
-    const error = new Error('Please enter your full name.')
-    error.status = 400
-    throw error
-  }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-    const error = new Error('Please enter a valid email address.')
-    error.status = 400
-    throw error
+  const existing = await findUserByEmail(cleanEmail)
+  if (existing) {
+    if (existing.status === 'disabled') {
+      const error = new Error('This account is unavailable. Contact support.')
+      error.status = 403
+      throw error
+    }
+
+    const phoneOk = normalizePhone(existing.phone) === cleanPhone
+    const nameOk = namesMatch(existing.name, cleanName)
+    if (!phoneOk || !nameOk) {
+      const error = new Error(
+        'Name or mobile does not match this email. Use the exact details from your account.',
+      )
+      error.status = 401
+      throw error
+    }
+
+    const db = getPool()
+    await db.query(
+      `UPDATE users
+       SET failed_login_attempts = 0,
+           locked_until = NULL,
+           last_login_at = NOW(),
+           updated_at = NOW()
+       WHERE id = $1`,
+      [existing.id],
+    )
+    const fresh = await findUserById(existing.id)
+    const tenantId = await ensureTenantForUser(fresh)
+    return { user: mapUser(fresh), tenantId, created: false }
   }
 
   const userId = newUserId()
   const subId = randomUUID()
-  // Hash is the slow step — start it before opening a DB transaction
-  const passwordHash = await hashPassword(password)
   const db = getPool()
   const client = await db.connect()
   let row
@@ -254,9 +309,9 @@ export async function registerUser({ name, email, password, phone }) {
     const inserted = await client.query(
       `INSERT INTO users (
          id, email, password_hash, name, phone, email_verified, provider, status
-       ) VALUES ($1, $2, $3, $4, $5, FALSE, 'local', 'active')
+       ) VALUES ($1, $2, NULL, $3, $4, FALSE, 'local', 'active')
        RETURNING *`,
-      [userId, cleanEmail, passwordHash, cleanName, cleanPhone],
+      [userId, cleanEmail, cleanName, cleanPhone],
     )
     row = inserted.rows[0]
     await client.query(
@@ -268,9 +323,8 @@ export async function registerUser({ name, email, password, phone }) {
   } catch (error) {
     await client.query('ROLLBACK')
     if (error?.code === '23505') {
-      const dup = new Error('This email is already registered. Try signing in.')
-      dup.status = 409
-      throw dup
+      // Race: treat as login retry
+      return signInWithDetails({ name, email, phone })
     }
     throw error
   } finally {
@@ -282,12 +336,22 @@ export async function registerUser({ name, email, password, phone }) {
     ensureTenantForUser(user),
     migrateLegacyLifetimeByEmail(cleanEmail, userId),
   ])
-  return { user, tenantId }
+  return { user, tenantId, created: true }
+}
+
+/** @deprecated use signInWithDetails — kept for route compatibility */
+export async function registerUser(input) {
+  return signInWithDetails(input)
+}
+
+/** @deprecated use signInWithDetails — kept for route compatibility */
+export async function authenticateUser(input) {
+  return signInWithDetails(input)
 }
 
 /**
- * If this email previously paid under the old profile system (no password user),
- * attach lifetime to the new permanent userId without trusting the client.
+ * If this email previously paid under the old profile system,
+ * attach lifetime to the new permanent userId.
  */
 async function migrateLegacyLifetimeByEmail(email, userId) {
   const db = getPool()
@@ -308,7 +372,6 @@ async function migrateLegacyLifetimeByEmail(email, userId) {
 
   await activateLifetimeSubscription(userId)
 
-  // Point legacy profile at the new permanent userId when it was a different uid
   if (legacy.uid && legacy.uid !== userId) {
     await db.query(
       `UPDATE profiles
@@ -317,62 +380,6 @@ async function migrateLegacyLifetimeByEmail(email, userId) {
       [legacy.tenant_id, userId],
     ).catch(() => undefined)
   }
-}
-
-const GENERIC_LOGIN_ERROR = 'Invalid email or password.'
-
-export async function authenticateUser({ email, password }) {
-  assertPostgres()
-  const cleanEmail = normalizeEmail(email)
-  const row = await findUserByEmail(cleanEmail)
-
-  // Constant-ish failure path
-  if (!row || row.status === 'disabled') {
-    const error = new Error(GENERIC_LOGIN_ERROR)
-    error.status = 401
-    throw error
-  }
-
-  if (row.locked_until && new Date(row.locked_until) > new Date()) {
-    const error = new Error('Account temporarily locked. Try again later.')
-    error.status = 423
-    throw error
-  }
-
-  const ok = await verifyPassword(password, row.password_hash)
-  const db = getPool()
-  if (!ok) {
-    const attempts = Number(row.failed_login_attempts || 0) + 1
-    const lock =
-      attempts >= 8
-        ? new Date(Date.now() + 15 * 60 * 1000).toISOString()
-        : null
-    await db.query(
-      `UPDATE users
-       SET failed_login_attempts = $2,
-           locked_until = $3::timestamptz,
-           updated_at = NOW()
-       WHERE id = $1`,
-      [row.id, attempts, lock],
-    )
-    const error = new Error(GENERIC_LOGIN_ERROR)
-    error.status = 401
-    throw error
-  }
-
-  await db.query(
-    `UPDATE users
-     SET failed_login_attempts = 0,
-         locked_until = NULL,
-         last_login_at = NOW(),
-         updated_at = NOW()
-     WHERE id = $1`,
-    [row.id],
-  )
-
-  const fresh = await findUserById(row.id)
-  const tenantId = await ensureTenantForUser(fresh)
-  return { user: mapUser(fresh), tenantId }
 }
 
 export async function issueTokenPair(user, meta = {}) {
