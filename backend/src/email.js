@@ -1,26 +1,40 @@
 import nodemailer from 'nodemailer'
 
 function getSmtpConfig() {
-  const host = String(process.env.SMTP_HOST || 'smtp.gmail.com').trim()
-  const user = String(process.env.SMTP_USER || process.env.GMAIL_USER || '').trim()
+  const host = String(
+    process.env.SMTP_HOST || 'smtp-relay.brevo.com',
+  ).trim()
+  const user = String(
+    process.env.SMTP_USER ||
+      process.env.BREVO_SMTP_LOGIN ||
+      process.env.GMAIL_USER ||
+      '',
+  ).trim()
   const pass = String(
-    process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || '',
+    process.env.SMTP_PASS ||
+      process.env.BREVO_SMTP_KEY ||
+      process.env.GMAIL_APP_PASSWORD ||
+      '',
   )
     .replace(/\s+/g, '')
     .trim()
   const from = String(
-    process.env.SMTP_FROM || process.env.EMAIL_FROM || user || '',
+    process.env.SMTP_FROM || process.env.EMAIL_FROM || '',
   ).trim()
   const port = Number(process.env.SMTP_PORT || 587)
   const secure =
-    String(process.env.SMTP_SECURE || 'false').toLowerCase() === 'true'
+    String(process.env.SMTP_SECURE || (port === 465 ? 'true' : 'false'))
+      .toLowerCase() === 'true'
   const senderName = String(process.env.SMTP_SENDER_NAME || 'BizVyapar').trim()
 
+  // From must be a Brevo-verified sender (often your Gmail). Login is separate.
   if (!user || !pass || !from) {
     return null
   }
 
-  return { host, user, pass, from, port, secure, senderName }
+  const provider = /brevo|sendinblue/i.test(host) ? 'brevo' : 'smtp'
+
+  return { host, user, pass, from, port, secure, senderName, provider }
 }
 
 export function isEmailConfigured() {
@@ -33,16 +47,18 @@ export function getEmailConfigStatus() {
   if (!smtp) {
     return {
       configured: false,
-      reason: 'Missing Gmail SMTP_USER / SMTP_PASS (App Password)',
+      reason:
+        'Missing SMTP_USER / SMTP_PASS / SMTP_FROM (Brevo SMTP login + SMTP key + verified sender)',
     }
   }
 
   return {
     configured: true,
-    mode: 'gmail-smtp',
+    mode: smtp.provider === 'brevo' ? 'brevo-smtp' : 'smtp',
     senderEmail: smtp.from,
     senderName: smtp.senderName,
     host: smtp.host,
+    port: smtp.port,
   }
 }
 
@@ -261,7 +277,7 @@ async function sendMail({ to, name, subject, text, html }) {
   const config = getSmtpConfig()
   if (!config) {
     const error = new Error(
-      'Email is not configured. Add Gmail SMTP_USER and SMTP_PASS (App Password) to backend/.env',
+      'Email is not configured. Add Brevo SMTP_USER, SMTP_PASS, and SMTP_FROM on the server.',
     )
     error.status = 503
     throw error
@@ -269,7 +285,9 @@ async function sendMail({ to, name, subject, text, html }) {
 
   const safeName = name || 'there'
   const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
     auth: {
       user: config.user,
       pass: config.pass,
@@ -284,13 +302,14 @@ async function sendMail({ to, name, subject, text, html }) {
     html,
   })
 
-  console.log('[email] sent via Gmail SMTP', {
+  console.log(`[email] sent via ${config.provider}-smtp`, {
     to: recipient,
     subject,
+    host: config.host,
     messageId: info.messageId || null,
   })
 
-  return { mode: 'gmail-smtp', messageId: info.messageId || null }
+  return { mode: `${config.provider}-smtp`, messageId: info.messageId || null }
 }
 
 export async function sendWebinarPaymentEmail({
