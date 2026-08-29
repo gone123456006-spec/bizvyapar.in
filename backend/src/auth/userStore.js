@@ -135,6 +135,19 @@ export async function findUserByEmail(email) {
   return res.rows[0] || null
 }
 
+export async function findUserByPhone(phone) {
+  if (preferMongo()) return mongoAuth.findUserByPhone(phone)
+  assertPostgres()
+  const cleanPhone = normalizePhone(phone)
+  if (!cleanPhone) return null
+  const db = getPool()
+  const res = await db.query(
+    `SELECT * FROM users WHERE phone = $1 LIMIT 1`,
+    [cleanPhone],
+  )
+  return res.rows[0] || null
+}
+
 export async function findUserById(userId) {
   if (preferMongo()) return mongoAuth.findUserById(userId)
   assertPostgres()
@@ -301,13 +314,15 @@ export async function loginWithEmailPhone({ email, phone }) {
   }
 
   const storedPhone = normalizePhone(existing.phone)
-  // Gmail is the account key. Mobile is required, but a mismatch must not
-  // block Sign In — update stored mobile to the one just entered.
-  const nextPhone = cleanPhone || storedPhone
+  if (!storedPhone || storedPhone !== cleanPhone) {
+    const error = new Error(
+      'Gmail and mobile do not match. Use the same Gmail and 10-digit number you signed up with.',
+    )
+    error.status = 401
+    throw error
+  }
 
   const user = mapUser(existing)
-  user.phone = nextPhone
-
   const tenantId = `uid_${user.id}`
   const subscription = mapSubscription({
     plan: existing.sub_plan,
@@ -320,13 +335,12 @@ export async function loginWithEmailPhone({ email, phone }) {
   void db
     .query(
       `UPDATE users
-       SET phone = $2,
-           failed_login_attempts = 0,
+       SET failed_login_attempts = 0,
            locked_until = NULL,
            last_login_at = NOW(),
            updated_at = NOW()
        WHERE id = $1`,
-      [existing.id, nextPhone],
+      [existing.id],
     )
     .then(() => ensureTenantForUser(user))
     .catch(() => undefined)
@@ -336,7 +350,6 @@ export async function loginWithEmailPhone({ email, phone }) {
 
 /**
  * Sign Up — Name + Gmail + mobile (new accounts only).
- * Reliable transaction insert (user + subscription).
  */
 export async function registerUser({ name, email, phone }) {
   if (preferMongo()) return mongoAuth.registerUser({ name, email, phone })
@@ -346,6 +359,24 @@ export async function registerUser({ name, email, phone }) {
     email,
     phone,
   })
+
+  const existingEmail = await findUserByEmail(cleanEmail)
+  if (existingEmail) {
+    const error = new Error(
+      'This Gmail is already registered. Please Sign In.',
+    )
+    error.status = 409
+    throw error
+  }
+
+  const existingPhone = await findUserByPhone(cleanPhone)
+  if (existingPhone) {
+    const error = new Error(
+      'This mobile number is already registered. Please Sign In.',
+    )
+    error.status = 409
+    throw error
+  }
 
   const userId = newUserId()
   const subId = randomUUID()
@@ -372,8 +403,20 @@ export async function registerUser({ name, email, phone }) {
       throw new Error('Could not create account. Please try again.')
     }
   } catch (error) {
+    if (error?.status === 409) throw error
     if (error?.code === '23505') {
-      return loginWithEmailPhone({ email: cleanEmail, phone: cleanPhone })
+      if (/phone/i.test(error.constraint || error.detail || '')) {
+        const err = new Error(
+          'This mobile number is already registered. Please Sign In.',
+        )
+        err.status = 409
+        throw err
+      }
+      const err = new Error(
+        'This Gmail is already registered. Please Sign In.',
+      )
+      err.status = 409
+      throw err
     }
     throw error
   }

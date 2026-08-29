@@ -34,7 +34,7 @@ function userFacingAuthError(error, fallback = 'Something went wrong. Please try
 
   // Keep intentional auth guidance messages
   if (
-    /No account found|already exists|Please Sign (In|Up)|valid email|valid 10-digit|full name|Mobile number|Gmail and mobile/i.test(
+    /No account found|already (exists|registered)|Please Sign (In|Up)|valid email|valid 10-digit|full name|Mobile number|Gmail and mobile|do not match/i.test(
       raw,
     )
   ) {
@@ -54,11 +54,15 @@ function userFacingAuthError(error, fallback = 'Something went wrong. Please try
 
   if (
     code === '23505' ||
-    /duplicate key|unique constraint|tenants_email|users_email/i.test(raw)
+    /duplicate key|unique constraint|tenants_email|users_email|users_phone/i.test(
+      raw,
+    )
   ) {
     return {
       status: 409,
-      message: 'Account already exists. Please Sign In.',
+      message: /phone/i.test(raw)
+        ? 'This mobile number is already registered. Please Sign In.'
+        : 'This Gmail is already registered. Please Sign In.',
     }
   }
   if (error?.status && error.status >= 400 && error.status < 500) {

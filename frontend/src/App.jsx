@@ -403,7 +403,7 @@ function FieldIcon({ filled, children }) {
 
 export default function App() {
   const navigate = useNavigate()
-  const { user, signingIn, signInWithDetails, signOut, refreshProfile } =
+  const { user, signingIn, register, login, signOut, refreshProfile } =
     useAuth()
   const publicSettings = usePublicSettings(4000)
   const amountLabel = publicSettings.amountLabel || '₹1'
@@ -815,12 +815,18 @@ export default function App() {
       let activeUser = user
       if (!activeUser) {
         setMessage(authMode === 'signin' ? 'Signing in…' : 'Creating account…')
-        // One simple continue API — creates or signs in
-        activeUser = await signInWithDetails({
-          name: name.trim() || undefined,
-          email: email.trim(),
-          phone: digits,
-        })
+        if (authMode === 'signin') {
+          activeUser = await login({
+            email: email.trim(),
+            phone: digits,
+          })
+        } else {
+          activeUser = await register({
+            name: name.trim(),
+            email: email.trim(),
+            phone: digits,
+          })
+        }
       }
 
       const paid =
@@ -1940,8 +1946,8 @@ export default function App() {
                   </h2>
                   <p className="join-sub">
                     {authMode === 'signin'
-                      ? 'Enter Gmail and mobile to access your account.'
-                      : 'Enter name, Gmail, and mobile to create your account.'}
+                      ? 'Enter the same Gmail and 10-digit mobile used at Sign Up.'
+                      : 'Enter name, Gmail, and a new 10-digit mobile to create your account.'}
                   </p>
 
                   <form
@@ -1999,9 +2005,16 @@ export default function App() {
                         name="phone"
                         autoComplete="tel"
                         inputMode="numeric"
+                        pattern="[0-9]{10}"
+                        maxLength={10}
                         placeholder="10-digit mobile"
                         value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
+                        onChange={(e) => {
+                          const digits = e.target.value
+                            .replace(/\D/g, '')
+                            .slice(0, 10)
+                          setPhone(digits)
+                        }}
                         required
                       />
                       <FieldIcon filled={phone.trim().length > 0}>

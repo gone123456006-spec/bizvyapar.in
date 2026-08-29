@@ -122,6 +122,13 @@ export async function findUserByEmail(email) {
   return col('users').findOne({ email: normalizeEmail(email) })
 }
 
+export async function findUserByPhone(phone) {
+  assertMongoAuth()
+  const cleanPhone = normalizePhone(phone)
+  if (!cleanPhone) return null
+  return col('users').findOne({ phone: cleanPhone })
+}
+
 export async function findUserById(userId) {
   assertMongoAuth()
   return col('users').findOne({ _id: String(userId) })
@@ -233,24 +240,33 @@ export async function loginWithEmailPhone({ email, phone }) {
     throw error
   }
 
+  const storedPhone = normalizePhone(existing.phone)
+  if (!storedPhone || storedPhone !== cleanPhone) {
+    const error = new Error(
+      'Gmail and mobile do not match. Use the same Gmail and 10-digit number you signed up with.',
+    )
+    error.status = 401
+    throw error
+  }
+
   const userId = String(existing._id)
   const now = new Date()
-  await col('users').updateOne(
-    { _id: userId },
-    {
-      $set: {
-        phone: cleanPhone,
-        failedLoginAttempts: 0,
-        lockedUntil: null,
-        lastLoginAt: now,
-        updatedAt: now,
+  void col('users')
+    .updateOne(
+      { _id: userId },
+      {
+        $set: {
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+          lastLoginAt: now,
+          updatedAt: now,
+        },
       },
-    },
-  )
+    )
+    .catch(() => undefined)
 
   const user = mapUser({
     ...existing,
-    phone: cleanPhone,
     lastLoginAt: now,
     updatedAt: now,
   })
@@ -268,6 +284,24 @@ export async function registerUser({ name, email, phone }) {
     email,
     phone,
   })
+
+  const existingEmail = await findUserByEmail(cleanEmail)
+  if (existingEmail) {
+    const error = new Error(
+      'This Gmail is already registered. Please Sign In.',
+    )
+    error.status = 409
+    throw error
+  }
+
+  const existingPhone = await findUserByPhone(cleanPhone)
+  if (existingPhone) {
+    const error = new Error(
+      'This mobile number is already registered. Please Sign In.',
+    )
+    error.status = 409
+    throw error
+  }
 
   const userId = newUserId()
   const now = new Date()
@@ -301,7 +335,19 @@ export async function registerUser({ name, email, phone }) {
     ])
   } catch (error) {
     if (error?.code === 11000) {
-      return loginWithEmailPhone({ email: cleanEmail, phone: cleanPhone })
+      const key = JSON.stringify(error.keyPattern || error.keyValue || {})
+      if (/phone/i.test(key)) {
+        const err = new Error(
+          'This mobile number is already registered. Please Sign In.',
+        )
+        err.status = 409
+        throw err
+      }
+      const err = new Error(
+        'This Gmail is already registered. Please Sign In.',
+      )
+      err.status = 409
+      throw err
     }
     throw error
   }

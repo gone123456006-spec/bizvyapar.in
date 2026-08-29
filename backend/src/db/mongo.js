@@ -100,11 +100,32 @@ export function col(name) {
 }
 
 async function ensureMongoIndexes(database) {
-  await Promise.all([
-    database.collection('users').createIndexes([
+  try {
+    await database.collection('users').dropIndex('users_phone')
+  } catch {
+    // old non-unique index may not exist
+  }
+  try {
+    await database.collection('users').createIndexes([
       { key: { email: 1 }, unique: true, name: 'users_email_unique' },
-      { key: { phone: 1 }, name: 'users_phone' },
-    ]),
+      {
+        key: { phone: 1 },
+        unique: true,
+        sparse: true,
+        name: 'users_phone_unique',
+      },
+    ])
+  } catch (error) {
+    console.warn('[mongo] users phone unique index skipped:', error.message)
+    await database
+      .collection('users')
+      .createIndexes([
+        { key: { email: 1 }, unique: true, name: 'users_email_unique' },
+        { key: { phone: 1 }, name: 'users_phone' },
+      ])
+      .catch(() => undefined)
+  }
+  await Promise.all([
     database.collection('refresh_tokens').createIndexes([
       { key: { tokenHash: 1 }, unique: true, name: 'refresh_token_hash_unique' },
       { key: { userId: 1 }, name: 'refresh_tokens_user' },

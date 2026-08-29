@@ -187,6 +187,19 @@ export async function initPostgres() {
     CREATE INDEX IF NOT EXISTS subscriptions_status_idx ON subscriptions(status);
   `)
 
+  await db
+    .query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS users_phone_unique_idx
+       ON users (phone)
+       WHERE phone IS NOT NULL AND phone <> ''`,
+    )
+    .catch((error) => {
+      console.warn(
+        '[postgres] users phone unique index skipped:',
+        error.message,
+      )
+    })
+
   // Passwordless accounts — never require password_hash
   await db.query(`
     ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL

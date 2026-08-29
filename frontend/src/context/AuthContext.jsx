@@ -68,7 +68,7 @@ function toUserAuthMessage(raw, fallback = 'Something went wrong. Please try aga
   const msg = String(raw || '').trim()
   if (!msg) return fallback
   if (
-    /No account found|already exists|Please Sign (In|Up)|valid email|valid 10-digit|full name|Mobile number|Gmail and mobile|updating|try again/i.test(
+    /No account found|already (exists|registered)|Please Sign (In|Up)|valid email|valid 10-digit|full name|Mobile number|Gmail and mobile|do not match/i.test(
       msg,
     )
   ) {
@@ -246,7 +246,9 @@ export function AuthProvider({ children }) {
             res.status === 404
               ? 'No account found. Please Sign Up.'
               : res.status === 409
-                ? 'Account already exists. Please Sign In.'
+                ? 'This Gmail or mobile is already registered. Please Sign In.'
+                : res.status === 401
+                  ? 'Gmail and mobile do not match. Use the same details you signed up with.'
                 : 'Something went wrong. Please try again.',
           ),
         )
@@ -275,21 +277,18 @@ export function AuthProvider({ children }) {
   }
 
   async function register({ name, email, phone }) {
-    // Simple path: create account, or continue if Gmail already exists
-    return authRequest('/api/auth/continue', { name, email, phone })
+    return authRequest('/api/auth/register', { name, email, phone })
   }
 
-  async function login({ email, phone, name }) {
-    // Simple path: sign in, or create if details include name
-    return authRequest('/api/auth/continue', {
-      email,
-      phone,
-      ...(name ? { name } : {}),
-    })
+  async function login({ email, phone }) {
+    return authRequest('/api/auth/login', { email, phone })
   }
 
   async function signInWithDetails({ name, email, phone }) {
-    return authRequest('/api/auth/continue', { name, email, phone })
+    if (name) {
+      return register({ name, email, phone })
+    }
+    return login({ email, phone })
   }
 
   async function signOut() {
