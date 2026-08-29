@@ -403,7 +403,7 @@ function FieldIcon({ filled, children }) {
 
 export default function App() {
   const navigate = useNavigate()
-  const { user, signingIn, error, register, login, signOut, refreshProfile } =
+  const { user, signingIn, register, login, signOut, refreshProfile } =
     useAuth()
   const publicSettings = usePublicSettings(4000)
   const amountLabel = publicSettings.amountLabel || '₹1'
@@ -1257,7 +1257,6 @@ export default function App() {
               ) : null}
             </div>
           </div>
-          {error ? <p className="nav-auth-error">{error}</p> : null}
         </header>
       </div>
 

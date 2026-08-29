@@ -116,48 +116,113 @@ export async function isLifetimeActiveForUser(userId) {
 }
 
 /**
- * Ensure tenant/profile rows exist for payment isolation (tenant_id = uid_<userId>).
+ * Ensure tenant/profile rows exist for payment isolation.
+ * Reuses an existing tenant by email (or uid) so legacy paid emails
+ * never hit tenants_email_key duplicates.
  */
 export async function ensureTenantForUser(user) {
   assertPostgres()
   const db = getPool()
-  const userId = user.id || user.userId
-  const tenantId = `uid_${userId}`
+  const userId = String(user.id || user.userId || '').trim()
   const email = normalizeEmail(user.email)
   const now = new Date().toISOString()
   const name = sanitizeName(user.name) || null
   const phone = normalizePhone(user.phone)
 
-  await Promise.all([
-    db.query(
-      `INSERT INTO tenants (tenant_id, email, uid, created_at, updated_at)
-       VALUES ($1, $2, $3, $4::timestamptz, $4::timestamptz)
-       ON CONFLICT (tenant_id) DO UPDATE
-         SET email = COALESCE(EXCLUDED.email, tenants.email),
-             uid = COALESCE(tenants.uid, EXCLUDED.uid),
-             updated_at = EXCLUDED.updated_at`,
-      [tenantId, email, userId, now],
-    ),
-    db.query(
-      `INSERT INTO profiles (
-         tenant_id, email, uid, name, phone, provider, email_verified,
-         status, created_at, updated_at
-       ) VALUES (
-         $1, $2, $3, $4, $5, 'local', TRUE, 'active', $6::timestamptz, $6::timestamptz
-       )
-       ON CONFLICT (tenant_id) DO UPDATE SET
-         email = COALESCE(EXCLUDED.email, profiles.email),
-         uid = COALESCE(profiles.uid, EXCLUDED.uid),
-         name = COALESCE(EXCLUDED.name, profiles.name),
-         phone = COALESCE(EXCLUDED.phone, profiles.phone),
-         provider = 'local',
-         email_verified = TRUE,
-         updated_at = EXCLUDED.updated_at`,
-      [tenantId, email, userId, name, phone, now],
-    ),
-  ])
+  if (!userId && !email) {
+    const error = new Error('Could not set up your account. Please try again.')
+    error.status = 400
+    throw error
+  }
 
+  const existing = await db.query(
+    `SELECT tenant_id, email, uid FROM tenants
+     WHERE ($1::text IS NOT NULL AND uid = $1)
+        OR ($2::text IS NOT NULL AND email = $2)
+     LIMIT 1`,
+    [userId || null, email || null],
+  )
+
+  const tenantId = existing.rows[0]?.tenant_id || `uid_${userId}`
+
+  if (existing.rows[0]) {
+    await db.query(
+      `UPDATE tenants
+       SET email = COALESCE($2, email),
+           uid = COALESCE($3, uid),
+           updated_at = $4::timestamptz
+       WHERE tenant_id = $1`,
+      [tenantId, email, userId || null, now],
+    )
+  } else {
+    try {
+      await db.query(
+        `INSERT INTO tenants (tenant_id, email, uid, created_at, updated_at)
+         VALUES ($1, $2, $3, $4::timestamptz, $4::timestamptz)`,
+        [tenantId, email, userId || null, now],
+      )
+    } catch (error) {
+      if (error?.code === '23505') {
+        // Race: email claimed between select and insert — claim existing row
+        const again = await db.query(
+          `SELECT tenant_id FROM tenants WHERE email = $1 LIMIT 1`,
+          [email],
+        )
+        const claimed = again.rows[0]?.tenant_id
+        if (claimed) {
+          await db.query(
+            `UPDATE tenants
+             SET uid = COALESCE($2, uid), updated_at = $3::timestamptz
+             WHERE tenant_id = $1`,
+            [claimed, userId || null, now],
+          )
+          await upsertProfileForTenant(db, claimed, {
+            email,
+            userId,
+            name,
+            phone,
+            now,
+          })
+          return claimed
+        }
+        const friendly = new Error(
+          'This email is already registered. Try signing in.',
+        )
+        friendly.status = 409
+        throw friendly
+      }
+      throw error
+    }
+  }
+
+  await upsertProfileForTenant(db, tenantId, {
+    email,
+    userId,
+    name,
+    phone,
+    now,
+  })
   return tenantId
+}
+
+async function upsertProfileForTenant(db, tenantId, { email, userId, name, phone, now }) {
+  await db.query(
+    `INSERT INTO profiles (
+       tenant_id, email, uid, name, phone, provider, email_verified,
+       status, created_at, updated_at
+     ) VALUES (
+       $1, $2, $3, $4, $5, 'local', TRUE, 'active', $6::timestamptz, $6::timestamptz
+     )
+     ON CONFLICT (tenant_id) DO UPDATE SET
+       email = COALESCE(EXCLUDED.email, profiles.email),
+       uid = COALESCE(EXCLUDED.uid, profiles.uid),
+       name = COALESCE(EXCLUDED.name, profiles.name),
+       phone = COALESCE(EXCLUDED.phone, profiles.phone),
+       provider = 'local',
+       email_verified = TRUE,
+       updated_at = EXCLUDED.updated_at`,
+    [tenantId, email, userId || null, name, phone, now],
+  )
 }
 
 export async function registerUser({ name, email, password, phone }) {
@@ -203,7 +268,7 @@ export async function registerUser({ name, email, password, phone }) {
   } catch (error) {
     await client.query('ROLLBACK')
     if (error?.code === '23505') {
-      const dup = new Error('Could not create account. Please try signing in.')
+      const dup = new Error('This email is already registered. Try signing in.')
       dup.status = 409
       throw dup
     }

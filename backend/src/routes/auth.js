@@ -26,6 +26,28 @@ function clientIp(req) {
   return forwarded || req.ip || req.socket?.remoteAddress || ''
 }
 
+/** Never leak SQL / infra details to clients. */
+function userFacingAuthError(error, fallback = 'Something went wrong. Please try again.') {
+  const raw = String(error?.message || '')
+  const code = error?.code
+  if (
+    code === '23505' ||
+    /duplicate key|unique constraint|tenants_email|users_email/i.test(raw)
+  ) {
+    return {
+      status: 409,
+      message: 'This email is already registered. Try signing in.',
+    }
+  }
+  if (error?.status && error.status >= 400 && error.status < 500) {
+    if (/constraint|duplicate key|ECONN|postgres|SQLSTATE|violates/i.test(raw)) {
+      return { status: error.status, message: fallback }
+    }
+    return { status: error.status, message: raw || fallback }
+  }
+  return { status: 500, message: fallback }
+}
+
 function publicUser(user, tenantId, subscription) {
   return {
     id: user.id,
@@ -95,9 +117,11 @@ authRouter.post('/register', authRateLimit(), async (req, res) => {
     })
   } catch (error) {
     console.error('Register failed:', error.message)
-    return res.status(error.status || 500).json({
-      message: error.message || 'Could not create account.',
-    })
+    const facing = userFacingAuthError(
+      error,
+      'Could not create account. Please try again.',
+    )
+    return res.status(facing.status).json({ message: facing.message })
   }
 })
 
@@ -138,9 +162,17 @@ authRouter.post('/login', authRateLimit(), async (req, res) => {
       expiresIn: tokens.expiresIn,
     })
   } catch (error) {
-    return res.status(error.status || 500).json({
-      message: error.message || 'Invalid email or password.',
-    })
+    if (error?.status === 423) {
+      return res.status(423).json({
+        message: 'Too many attempts. Try again later.',
+      })
+    }
+    const facing = userFacingAuthError(error, 'Invalid email or password.')
+    // Always generic for failed login (no email-enumeration)
+    if (facing.status === 401 || facing.status === 500) {
+      return res.status(401).json({ message: 'Invalid email or password.' })
+    }
+    return res.status(facing.status).json({ message: facing.message })
   }
 })
 

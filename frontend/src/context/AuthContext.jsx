@@ -64,6 +64,20 @@ function mapUserPayload(data) {
   }
 }
 
+function toUserAuthMessage(raw, fallback = 'Something went wrong. Please try again.') {
+  const msg = String(raw || '').trim()
+  if (!msg) return fallback
+  if (/duplicate key|unique constraint|tenants_email|users_email|SQLSTATE|ECONN|postgres/i.test(msg)) {
+    return 'This email is already registered. Try signing in.'
+  }
+  if (/violates|constraint|internal server|stack|at Object\./i.test(msg)) {
+    return fallback
+  }
+  // Keep short for production UI
+  if (msg.length > 120) return fallback
+  return msg
+}
+
 export async function getAccessToken() {
   return readStored(ACCESS_KEY)
 }
@@ -220,26 +234,34 @@ export function AuthProvider({ children }) {
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         throw new Error(
-          data.message ||
-            (res.status === 404
-              ? 'Auth service is updating. Please try again in a minute.'
-              : `Could not continue (${res.status}). Please try again.`),
+          toUserAuthMessage(
+            data.message,
+            res.status === 404
+              ? 'Please try again in a moment.'
+              : res.status === 409
+                ? 'This email is already registered. Try signing in.'
+                : 'Something went wrong. Please try again.',
+          ),
         )
       }
 
       const userId = data.user?.userId || data.user?.uid || data.user?.id
       if (!data.accessToken || !data.refreshToken || !userId) {
-        throw new Error('Auth response was incomplete. Please try again.')
+        throw new Error('Something went wrong. Please try again.')
       }
 
       const nextUser = mapUserPayload(data)
       applySession(data.accessToken, data.refreshToken, nextUser)
       scheduleRefresh(data.expiresIn)
+      setError('')
       return nextUser
     } catch (err) {
-      const message = err.message || 'Authentication failed.'
+      const message = toUserAuthMessage(
+        err.message,
+        'Something went wrong. Please try again.',
+      )
       setError(message)
-      throw err
+      throw new Error(message)
     } finally {
       setSigningIn(false)
     }
