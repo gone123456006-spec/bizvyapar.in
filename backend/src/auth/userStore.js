@@ -255,8 +255,8 @@ async function upsertProfileForTenant(db, tenantId, { email, userId, name, phone
 /**
  * Name + Email + Phone auth (no password).
  * - New Gmail → create permanent random UUID userId + subscription row
- * - Existing Gmail → must use the exact same mobile to open same userId + subscription
- * - Name is required, but returning users are keyed by Gmail + mobile
+ * - Existing Gmail → always restore the same userId + subscription
+ *   (name/mobile are updated from what they enter this time)
  */
 export async function signInWithDetails({ name, email, phone }) {
   assertPostgres()
@@ -271,19 +271,6 @@ export async function signInWithDetails({ name, email, phone }) {
     if (existing.status === 'disabled') {
       const error = new Error('This account is unavailable. Contact support.')
       error.status = 403
-      throw error
-    }
-
-    const storedPhone = normalizePhone(existing.phone)
-    const phoneMissing = !storedPhone
-    const phoneOk = storedPhone === cleanPhone
-
-    // Returning user must enter the exact same mobile for this Gmail
-    if (!phoneMissing && !phoneOk) {
-      const error = new Error(
-        'Use the same Gmail and mobile number registered on this account.',
-      )
-      error.status = 401
       throw error
     }
 
