@@ -21,8 +21,10 @@ export async function requireAuth(req, res, next) {
     }
 
     const user = mapUser(row)
-    const tenantId = await ensureTenantForUser(user)
-    const subscription = await getSubscriptionByUserId(user.id)
+    const [tenantId, subscription] = await Promise.all([
+      ensureTenantForUser(user),
+      getSubscriptionByUserId(user.id),
+    ])
 
     req.auth = {
       userId: user.id,
@@ -59,8 +61,10 @@ export async function optionalAuth(req, _res, next) {
       return next()
     }
     const user = mapUser(row)
-    const tenantId = await ensureTenantForUser(user)
-    const subscription = await getSubscriptionByUserId(user.id)
+    const [tenantId, subscription] = await Promise.all([
+      ensureTenantForUser(user),
+      getSubscriptionByUserId(user.id),
+    ])
     req.auth = {
       userId: user.id,
       uid: user.id,

@@ -513,15 +513,17 @@ export default function App() {
     let cancelled = false
 
     const syncPaidState = async () => {
-      // Wait briefly so Firebase token + backend sync can finish after sign-in.
-      for (const waitMs of [0, 400, 1200]) {
-        if (waitMs) {
-          await new Promise((resolve) => window.setTimeout(resolve, waitMs))
-        }
-        if (cancelled) return
-        const paid = await refreshSubscription()
-        if (paid || cancelled) return
+      if (cancelled) return
+      // Use subscription already on the user when present; otherwise one quick check
+      const existing = user?.subscription
+      if (
+        existing?.status === 'active' &&
+        existing?.plan === 'lifetime'
+      ) {
+        setSubscriptionActive(true)
+        return
       }
+      await refreshSubscription()
     }
 
     void syncPaidState()
@@ -786,11 +788,11 @@ export default function App() {
       }
 
       const paid =
-        (activeUser.subscription?.status === 'active' &&
-          activeUser.subscription?.plan === 'lifetime') ||
-        (await refreshSubscription())
+        activeUser.subscription?.status === 'active' &&
+        activeUser.subscription?.plan === 'lifetime'
 
       if (paid) {
+        setSubscriptionActive(true)
         openPaidLinksPopup()
         return
       }
@@ -803,7 +805,9 @@ export default function App() {
         email: lockedEmail,
         phone: digits || activeUser.phone || '',
       })
+      // Background sync only — do not block Sign In / Sign Up
       void refreshProfile()
+      void refreshSubscription()
     } catch (err) {
       setStatus('error')
       setMessage(err.message || 'Could not continue. Please try again.')

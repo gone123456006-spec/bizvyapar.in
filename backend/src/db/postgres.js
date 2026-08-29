@@ -17,7 +17,7 @@ export function getPool() {
         String(process.env.PGSSL || 'true').toLowerCase() === 'true'
           ? { rejectUnauthorized: false }
           : undefined,
-      max: Number(process.env.PG_POOL_MAX || 5),
+      max: Number(process.env.PG_POOL_MAX || 10),
     })
   }
   return pool

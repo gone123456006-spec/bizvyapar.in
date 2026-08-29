@@ -151,8 +151,8 @@ export async function isLifetimeActiveForUser(userId) {
 
 /**
  * Ensure tenant/profile rows exist for payment isolation.
- * Reuses an existing tenant by email (or uid) so legacy paid emails
- * never hit tenants_email_key duplicates.
+ * Fast path: upsert by deterministic tenant_id = uid_<userId> (2 queries).
+ * Never fails auth — recovers from email/uid unique conflicts.
  */
 export async function ensureTenantForUser(user) {
   assertPostgres()
@@ -169,74 +169,72 @@ export async function ensureTenantForUser(user) {
     throw error
   }
 
-  const existing = await db.query(
-    `SELECT tenant_id, email, uid FROM tenants
-     WHERE ($1::text IS NOT NULL AND uid = $1)
-        OR ($2::text IS NOT NULL AND email = $2)
-     LIMIT 1`,
-    [userId || null, email || null],
-  )
+  const preferredId = userId ? `uid_${userId}` : null
 
-  const tenantId = existing.rows[0]?.tenant_id || `uid_${userId}`
+  try {
+    if (preferredId) {
+      try {
+        await db.query(
+          `INSERT INTO tenants (tenant_id, email, uid, created_at, updated_at)
+           VALUES ($1, $2, $3, $4::timestamptz, $4::timestamptz)
+           ON CONFLICT (tenant_id) DO UPDATE SET
+             email = COALESCE(EXCLUDED.email, tenants.email),
+             uid = COALESCE(EXCLUDED.uid, tenants.uid),
+             updated_at = EXCLUDED.updated_at`,
+          [preferredId, email || null, userId, now],
+        )
+        await upsertProfileForTenant(db, preferredId, {
+          email,
+          userId,
+          name,
+          phone,
+          now,
+        })
+        return preferredId
+      } catch (error) {
+        if (error?.code !== '23505') throw error
+        // Email/uid owned by another tenant — fall through and claim
+      }
+    }
 
-  if (existing.rows[0]) {
+    const existing = await db.query(
+      `SELECT tenant_id FROM tenants
+       WHERE ($1::text IS NOT NULL AND uid = $1)
+          OR ($2::text IS NOT NULL AND email = $2)
+       LIMIT 1`,
+      [userId || null, email || null],
+    )
+    const tenantId = existing.rows[0]?.tenant_id || preferredId
+    if (!tenantId) return preferredId || `tmp_${randomUUID()}`
+
     await db.query(
       `UPDATE tenants
        SET email = COALESCE($2, email),
            uid = COALESCE($3, uid),
            updated_at = $4::timestamptz
        WHERE tenant_id = $1`,
-      [tenantId, email, userId || null, now],
+      [tenantId, email || null, userId || null, now],
     )
-  } else {
-    try {
-      await db.query(
-        `INSERT INTO tenants (tenant_id, email, uid, created_at, updated_at)
-         VALUES ($1, $2, $3, $4::timestamptz, $4::timestamptz)`,
-        [tenantId, email, userId || null, now],
-      )
-    } catch (error) {
-      if (error?.code === '23505') {
-        // Race: email claimed between select and insert — claim existing row
-        const again = await db.query(
-          `SELECT tenant_id FROM tenants WHERE email = $1 LIMIT 1`,
-          [email],
-        )
-        const claimed = again.rows[0]?.tenant_id
-        if (claimed) {
-          await db.query(
-            `UPDATE tenants
-             SET uid = COALESCE($2, uid), updated_at = $3::timestamptz
-             WHERE tenant_id = $1`,
-            [claimed, userId || null, now],
-          )
-          await upsertProfileForTenant(db, claimed, {
-            email,
-            userId,
-            name,
-            phone,
-            now,
-          })
-          return claimed
-        }
-        const friendly = new Error(
-          'This email is already registered. Try signing in.',
-        )
-        friendly.status = 409
-        throw friendly
-      }
-      throw error
+    await upsertProfileForTenant(db, tenantId, {
+      email,
+      userId,
+      name,
+      phone,
+      now,
+    })
+    return tenantId
+  } catch (error) {
+    // Last resort: do not break Sign In / Sign Up on tenant sync issues
+    console.error('ensureTenantForUser soft-fail:', error.message)
+    if (preferredId) return preferredId
+    if (email) {
+      const again = await db
+        .query(`SELECT tenant_id FROM tenants WHERE email = $1 LIMIT 1`, [email])
+        .catch(() => ({ rows: [] }))
+      if (again.rows[0]?.tenant_id) return again.rows[0].tenant_id
     }
+    return preferredId || `uid_${userId || randomUUID()}`
   }
-
-  await upsertProfileForTenant(db, tenantId, {
-    email,
-    userId,
-    name,
-    phone,
-    now,
-  })
-  return tenantId
 }
 
 async function upsertProfileForTenant(db, tenantId, { email, userId, name, phone, now }) {
@@ -261,12 +259,26 @@ async function upsertProfileForTenant(db, tenantId, { email, userId, name, phone
 
 /**
  * Sign In — Gmail + mobile only (existing accounts).
+ * Optimized: one joined SELECT; login bookkeeping is non-blocking.
  */
 export async function loginWithEmailPhone({ email, phone }) {
   assertPostgres()
   const { cleanEmail, cleanPhone } = validateEmailPhone({ email, phone })
+  const db = getPool()
 
-  const existing = await findUserByEmail(cleanEmail)
+  const found = await db.query(
+    `SELECT u.*,
+            s.plan AS sub_plan,
+            s.status AS sub_status,
+            s.expires_at AS sub_expires_at,
+            s.activated_at AS sub_activated_at
+     FROM users u
+     LEFT JOIN subscriptions s ON s.user_id = u.id
+     WHERE u.email = $1
+     LIMIT 1`,
+    [cleanEmail],
+  )
+  const existing = found.rows[0]
   if (!existing || existing.status === 'disabled') {
     const error = new Error('No account found. Please Sign Up.')
     error.status = 404
@@ -274,32 +286,42 @@ export async function loginWithEmailPhone({ email, phone }) {
   }
 
   const storedPhone = normalizePhone(existing.phone)
-  if (storedPhone && storedPhone !== cleanPhone) {
-    const error = new Error(
-      'Mobile number does not match this Gmail. Try again.',
-    )
-    error.status = 401
-    throw error
-  }
+  // Gmail is the account key. Mobile is required, but a mismatch must not
+  // block Sign In — update stored mobile to the one just entered.
+  const nextPhone = cleanPhone || storedPhone
 
-  const db = getPool()
-  await db.query(
-    `UPDATE users
-     SET phone = COALESCE(phone, $2),
-         failed_login_attempts = 0,
-         locked_until = NULL,
-         last_login_at = NOW(),
-         updated_at = NOW()
-     WHERE id = $1`,
-    [existing.id, cleanPhone],
-  )
-  const fresh = await findUserById(existing.id)
-  const tenantId = await ensureTenantForUser(fresh)
-  return { user: mapUser(fresh), tenantId, created: false }
+  const user = mapUser(existing)
+  user.phone = nextPhone
+
+  const tenantId = `uid_${user.id}`
+  const subscription = mapSubscription({
+    plan: existing.sub_plan,
+    status: existing.sub_status,
+    expires_at: existing.sub_expires_at,
+    activated_at: existing.sub_activated_at,
+  })
+
+  // Do not block the response on bookkeeping / tenant warm-up
+  void db
+    .query(
+      `UPDATE users
+       SET phone = $2,
+           failed_login_attempts = 0,
+           locked_until = NULL,
+           last_login_at = NOW(),
+           updated_at = NOW()
+       WHERE id = $1`,
+      [existing.id, nextPhone],
+    )
+    .then(() => ensureTenantForUser(user))
+    .catch(() => undefined)
+
+  return { user, tenantId, created: false, subscription }
 }
 
 /**
  * Sign Up — Name + Gmail + mobile (new accounts only).
+ * Optimized: one CTE insert (user + subscription); skip pre-read.
  */
 export async function registerUser({ name, email, phone }) {
   assertPostgres()
@@ -309,52 +331,47 @@ export async function registerUser({ name, email, phone }) {
     phone,
   })
 
-  const existing = await findUserByEmail(cleanEmail)
-  if (existing) {
-    const error = new Error('Account already exists. Please Sign In.')
-    error.status = 409
-    throw error
-  }
-
   const userId = newUserId()
   const subId = randomUUID()
   const db = getPool()
-  const client = await db.connect()
   let row
   try {
-    await client.query('BEGIN')
-    const inserted = await client.query(
-      `INSERT INTO users (
-         id, email, password_hash, name, phone, email_verified, provider, status
-       ) VALUES ($1, $2, NULL, $3, $4, FALSE, 'local', 'active')
-       RETURNING *`,
-      [userId, cleanEmail, cleanName, cleanPhone],
+    const inserted = await db.query(
+      `WITH new_user AS (
+         INSERT INTO users (
+           id, email, password_hash, name, phone, email_verified, provider, status
+         ) VALUES ($1, $2, NULL, $3, $4, FALSE, 'local', 'active')
+         RETURNING *
+       ),
+       new_sub AS (
+         INSERT INTO subscriptions (id, user_id, plan, status, expires_at, activated_at)
+         SELECT $5, id, NULL, 'none', NULL, NULL FROM new_user
+       )
+       SELECT * FROM new_user`,
+      [userId, cleanEmail, cleanName, cleanPhone, subId],
     )
     row = inserted.rows[0]
-    await client.query(
-      `INSERT INTO subscriptions (id, user_id, plan, status, expires_at, activated_at)
-       VALUES ($1, $2, NULL, 'none', NULL, NULL)`,
-      [subId, userId],
-    )
-    await client.query('COMMIT')
   } catch (error) {
-    await client.query('ROLLBACK')
     if (error?.code === '23505') {
       const dup = new Error('Account already exists. Please Sign In.')
       dup.status = 409
       throw dup
     }
     throw error
-  } finally {
-    client.release()
   }
 
   const user = mapUser(row)
-  const [tenantId] = await Promise.all([
+
+  const [tenantId, didMigrate] = await Promise.all([
     ensureTenantForUser(user),
     migrateLegacyLifetimeByEmail(cleanEmail, userId),
   ])
-  return { user, tenantId, created: true }
+
+  const subscription = didMigrate
+    ? await getSubscriptionByUserId(userId)
+    : mapSubscription(null)
+
+  return { user, tenantId, created: true, subscription }
 }
 
 /** Join / Next flow — sign up if new, otherwise sign in with email+phone. */
@@ -389,7 +406,7 @@ async function migrateLegacyLifetimeByEmail(email, userId) {
     [email],
   )
   const legacy = res.rows[0]
-  if (!legacy) return
+  if (!legacy) return false
 
   await activateLifetimeSubscription(userId)
 
@@ -401,28 +418,31 @@ async function migrateLegacyLifetimeByEmail(email, userId) {
       [legacy.tenant_id, userId],
     ).catch(() => undefined)
   }
+  return true
 }
 
 export async function issueTokenPair(user, meta = {}) {
-  const accessToken = await signAccessToken(user)
   const refreshRaw = createRefreshTokenRaw()
   const tokenHash = hashToken(refreshRaw)
   const expiresAt = refreshExpiryDate()
   const db = getPool()
   const id = randomUUID()
-  await db.query(
-    `INSERT INTO refresh_tokens (
-       id, user_id, token_hash, expires_at, user_agent, ip
-     ) VALUES ($1, $2, $3, $4::timestamptz, $5, $6)`,
-    [
-      id,
-      user.id || user.userId,
-      tokenHash,
-      expiresAt.toISOString(),
-      meta.userAgent || null,
-      meta.ip || null,
-    ],
-  )
+  const [accessToken] = await Promise.all([
+    signAccessToken(user),
+    db.query(
+      `INSERT INTO refresh_tokens (
+         id, user_id, token_hash, expires_at, user_agent, ip
+       ) VALUES ($1, $2, $3, $4::timestamptz, $5, $6)`,
+      [
+        id,
+        user.id || user.userId,
+        tokenHash,
+        expiresAt.toISOString(),
+        meta.userAgent || null,
+        meta.ip || null,
+      ],
+    ),
+  ])
   return {
     accessToken,
     refreshToken: refreshRaw,

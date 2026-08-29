@@ -67,16 +67,23 @@ function mapUserPayload(data) {
 function toUserAuthMessage(raw, fallback = 'Something went wrong. Please try again.') {
   const msg = String(raw || '').trim()
   if (!msg) return fallback
-  if (/password/i.test(msg) || /same Gmail and mobile/i.test(msg)) {
-    return 'Could not sign in. Please check your details and try again.'
+  if (
+    /No account found|already exists|Please Sign (In|Up)|valid email|valid 10-digit|full name|Mobile number|Gmail and mobile/i.test(
+      msg,
+    )
+  ) {
+    return msg
+  }
+  if (/invalid email and password|wrong password|incorrect password/i.test(msg)) {
+    return 'Could not sign in. Please check your Gmail and mobile number.'
   }
   if (/duplicate key|unique constraint|tenants_email|users_email|SQLSTATE|ECONN|postgres/i.test(msg)) {
-    return 'Could not sign in. Please check your details and try again.'
+    return 'Account already exists. Please Sign In.'
   }
   if (/violates|constraint|internal server|stack|at Object\./i.test(msg)) {
     return fallback
   }
-  if (msg.length > 120) return fallback
+  if (msg.length > 140) return fallback
   return msg
 }
 

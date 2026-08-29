@@ -30,10 +30,23 @@ function clientIp(req) {
 function userFacingAuthError(error, fallback = 'Something went wrong. Please try again.') {
   const raw = String(error?.message || '')
   const code = error?.code
-  if (/password/i.test(raw) || /same Gmail and mobile/i.test(raw)) {
+
+  // Keep intentional auth guidance messages
+  if (
+    /No account found|already exists|Please Sign (In|Up)|valid email|valid 10-digit|full name|Mobile number/i.test(
+      raw,
+    )
+  ) {
     return {
-      status: error?.status && error.status >= 400 ? error.status : 401,
-      message: 'Could not sign in. Please check your details and try again.',
+      status: error?.status && error.status >= 400 ? error.status : 400,
+      message: raw,
+    }
+  }
+
+  if (/invalid email and password|wrong password|incorrect password/i.test(raw)) {
+    return {
+      status: 401,
+      message: 'Could not sign in. Please check your Gmail and mobile number.',
     }
   }
   if (
@@ -42,7 +55,7 @@ function userFacingAuthError(error, fallback = 'Something went wrong. Please try
   ) {
     return {
       status: 409,
-      message: 'Could not sign in. Please check your details and try again.',
+      message: 'Account already exists. Please Sign In.',
     }
   }
   if (error?.status && error.status >= 400 && error.status < 500) {
@@ -85,7 +98,7 @@ authRouter.get('/status', (_req, res) => {
 
 async function completeAuth(req, res, authFn) {
   try {
-    const { user, tenantId, created } = await authFn({
+    const { user, tenantId, created, subscription: authSub } = await authFn({
       name: req.body?.name,
       email: req.body?.email,
       phone: req.body?.phone,
@@ -96,7 +109,9 @@ async function completeAuth(req, res, authFn) {
         userAgent: req.headers['user-agent'],
         ip: clientIp(req),
       }),
-      getSubscriptionByUserId(user.id),
+      authSub
+        ? Promise.resolve(authSub)
+        : getSubscriptionByUserId(user.id),
     ])
 
     const sessionId = String(req.body?.sessionId || '').trim() || undefined
