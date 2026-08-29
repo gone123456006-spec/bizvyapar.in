@@ -1257,30 +1257,20 @@
 .form-links-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: center;
   margin-top: 12px;
   width: 100%;
-}
-
-.form-links-signin {
-  color: #006b3c;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.2;
-  flex-shrink: 0;
 }
 
 .form-terms-link {
   display: inline;
   margin-top: 0;
-  text-align: right;
+  text-align: center;
   color: #006b3c;
   font-size: 13px;
   font-weight: 700;
   text-decoration: underline;
   text-underline-offset: 2px;
-  margin-left: auto;
 }
 
 .form-terms-link:hover {

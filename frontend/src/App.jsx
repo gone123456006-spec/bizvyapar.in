@@ -1937,7 +1937,6 @@ export default function App() {
                     </button>
 
                     <div className="form-links-row">
-                      <span className="form-links-signin">Sign in</span>
                       <a
                         className="form-terms-link"
                         href="/terms"
