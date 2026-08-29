@@ -31,9 +31,17 @@ function userFacingAuthError(error, fallback = 'Something went wrong. Please try
   const raw = String(error?.message || '')
   const code = error?.code
 
+  // Password system is removed — never surface password errors
+  if (/password/i.test(raw)) {
+    return {
+      status: error?.status && error.status >= 400 ? error.status : 400,
+      message: 'No password needed. Use your Gmail and mobile number to continue.',
+    }
+  }
+
   // Keep intentional auth guidance messages
   if (
-    /No account found|already exists|Please Sign (In|Up)|valid email|valid 10-digit|full name|Mobile number/i.test(
+    /No account found|already exists|Please Sign (In|Up)|valid email|valid 10-digit|full name|Mobile number|Gmail and mobile/i.test(
       raw,
     )
   ) {
@@ -43,12 +51,6 @@ function userFacingAuthError(error, fallback = 'Something went wrong. Please try
     }
   }
 
-  if (/invalid email and password|wrong password|incorrect password/i.test(raw)) {
-    return {
-      status: 401,
-      message: 'Could not sign in. Please check your Gmail and mobile number.',
-    }
-  }
   if (
     code === '23505' ||
     /duplicate key|unique constraint|tenants_email|users_email/i.test(raw)
@@ -91,6 +93,11 @@ authRouter.get('/status', (_req, res) => {
     configured: true,
     provider: 'name-email-phone',
     passwordRequired: false,
+    passwordAuth: false,
+    modes: {
+      signUp: 'name + gmail + mobile (create account)',
+      signIn: 'gmail + mobile (existing account)',
+    },
     accessTokenTtl: process.env.ACCESS_TOKEN_TTL || '15m',
     isolation: 'per-user-database',
   })

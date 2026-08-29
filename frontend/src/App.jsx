@@ -810,7 +810,11 @@ export default function App() {
       void refreshSubscription()
     } catch (err) {
       setStatus('error')
-      setMessage(err.message || 'Could not continue. Please try again.')
+      setMessage(
+        /password/i.test(err.message || '')
+          ? 'No password needed. Use your Gmail and mobile number to continue.'
+          : err.message || 'Could not continue. Please try again.',
+      )
     }
   }
 
@@ -1865,15 +1869,20 @@ export default function App() {
               ) : (
                 <>
                   <h2 id="join-form-title">
-                    {authMode === 'signin' ? 'Sign In' : 'Create a new account'}
+                    {authMode === 'signin' ? 'Sign In' : 'Sign Up'}
                   </h2>
                   <p className="join-sub">
                     {authMode === 'signin'
-                      ? 'Enter your Gmail and mobile number.'
-                      : 'Register with your name, Gmail, and mobile number.'}
+                      ? 'Access your existing account with Gmail and mobile. No password.'
+                      : 'Create a new account with name, Gmail, and mobile. No password.'}
                   </p>
 
-                  <form className="join-form" onSubmit={handleDetailsNext} noValidate>
+                  <form
+                    className="join-form"
+                    onSubmit={handleDetailsNext}
+                    noValidate
+                    autoComplete="on"
+                  >
                     {authMode === 'signup' ? (
                       <label className="pill-field">
                         <span className="sr-only">Name</span>
@@ -1922,6 +1931,7 @@ export default function App() {
                         type="tel"
                         name="phone"
                         autoComplete="tel"
+                        inputMode="numeric"
                         placeholder="10-digit mobile"
                         value={phone}
                         onChange={(e) => setPhone(e.target.value)}
@@ -1948,11 +1958,13 @@ export default function App() {
                       </span>
                     </label>
 
-                    {status === 'error' && (
+                    {status === 'error' && message ? (
                       <p className="form-error" role="alert">
-                        {message}
+                        {/password/i.test(message)
+                          ? 'No password needed. Use your Gmail and mobile number to continue.'
+                          : message}
                       </p>
-                    )}
+                    ) : null}
 
                     <button
                       className="btn-trial"
@@ -1963,7 +1975,7 @@ export default function App() {
                         ? 'Please wait…'
                         : authMode === 'signin'
                           ? 'Sign In'
-                          : 'Next >'}
+                          : 'Sign Up'}
                     </button>
 
                     <p className="form-note">
