@@ -3472,22 +3472,26 @@
 /* —— Join form modal —— */
 .join-form-overlay {
   z-index: 110;
-  align-items: flex-start;
+  display: flex;
+  align-items: center;
   justify-content: center;
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 16px 12px 32px;
+  padding: 24px 12px;
   overscroll-behavior: contain;
   width: 100%;
   max-width: 100%;
+  min-height: 100%;
+  box-sizing: border-box;
 }
 
 .join-form-modal {
   position: relative;
   width: min(100%, 440px);
-  margin: 12px auto 24px;
+  margin: auto;
   max-height: none;
+  flex-shrink: 0;
 }
 
 .join-form-close {

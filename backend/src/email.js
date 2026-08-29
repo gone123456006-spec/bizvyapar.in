@@ -296,10 +296,20 @@ async function sendMail({ to, name, subject, text, html }) {
     host: config.host,
     port: config.port,
     secure: config.secure,
+    requireTLS: !config.secure && config.port === 587,
     auth: {
       user: config.user,
       pass: config.pass,
     },
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 20_000,
+  })
+
+  // Fail fast if SMTP auth is wrong (Render misconfig)
+  await transporter.verify().catch((error) => {
+    console.error('[email] SMTP verify failed:', error.message)
+    throw error
   })
 
   const info = await transporter.sendMail({

@@ -137,6 +137,7 @@ async function finalizePaidSeat({
     await activateLifetimeSubscription(auth.userId).catch(() => undefined)
   }
 
+  let emailSent = false
   let emailError = null
 
   if (saved.alreadyRecorded) {
@@ -150,24 +151,37 @@ async function finalizePaidSeat({
   }
 
   if (sendEmail && isEmailConfigured()) {
-    // Fire-and-forget — never delay the payment success response.
-    void sendWebinarPaymentEmail({
+    console.log('[payments] sending webinar email', {
       to: lead.email,
-      name: lead.name,
       paymentId,
-      webinarLink,
-      amountLabel,
-    }).catch((error) => {
-      console.error('Failed to send webinar email:', error)
+      ...getEmailConfigStatus(),
     })
+    try {
+      // Await send so Render does not freeze the process before mail goes out
+      await sendWebinarPaymentEmail({
+        to: lead.email,
+        name: lead.name,
+        paymentId,
+        webinarLink,
+        amountLabel,
+      })
+      emailSent = true
+      emailError = null
+    } catch (error) {
+      emailSent = false
+      emailError = error.message || 'Could not send confirmation email.'
+      console.error('Failed to send webinar email:', error)
+    }
   } else if (sendEmail) {
-    emailError = 'Email is not configured on the server.'
+    emailError =
+      'Email is not configured on the server. Add SMTP_HOST, SMTP_USER, SMTP_PASS, SMTP_FROM on Render.'
+    console.error('[payments] email not configured', getEmailConfigStatus())
   }
 
   return {
     saved,
     webinarLink: webinarLink || null,
-    emailSent: false,
+    emailSent,
     emailError,
     alreadyRecorded: false,
   }

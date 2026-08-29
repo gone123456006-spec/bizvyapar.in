@@ -61,12 +61,26 @@ services:
         sync: false
       - key: WEBINAR_LINK
         sync: false
+      - key: SMTP_HOST
+        value: smtp-relay.brevo.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_SECURE
+        value: "false"
       - key: SMTP_USER
         sync: false
       - key: SMTP_PASS
         sync: false
+      - key: SMTP_PASSWORD
+        sync: false
       - key: SMTP_FROM
         sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: SMTP_SENDER_NAME
+        value: BizVyapar
+      - key: SMTP_FROM_NAME
+        value: BizVyapar
       - key: FIREBASE_PROJECT_ID
         sync: false
       - key: FIREBASE_CLIENT_EMAIL

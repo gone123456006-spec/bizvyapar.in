@@ -1,8 +1,9 @@
 /**
  * MongoDB Atlas connection for BizVyapar durable data.
+ * Uses Atlas Stable API (same options as Atlas “Connect” sample).
  * Set MONGODB_URI in env (never commit the real URI).
  */
-import { MongoClient } from 'mongodb'
+import { MongoClient, ServerApiVersion } from 'mongodb'
 
 let client = null
 let db = null
@@ -49,16 +50,25 @@ export async function initMongo() {
   if (!connecting) {
     connecting = (async () => {
       const uri = getMongoUri()
+      // Atlas Connect sample options + Stable API
       client = new MongoClient(uri, {
+        serverApi: {
+          version: ServerApiVersion.v1,
+          strict: true,
+          deprecationErrors: true,
+        },
         maxPoolSize: Number(process.env.MONGO_POOL_MAX || 10),
-        serverSelectionTimeoutMS: 12_000,
+        serverSelectionTimeoutMS: 15_000,
       })
       await client.connect()
+      // Ping admin (Atlas sample), then use app database
+      await client.db('admin').command({ ping: 1 })
       db = client.db(getMongoDbName())
-      await db.command({ ping: 1 })
       await ensureMongoIndexes(db)
       mongoReady = true
-      console.log(`[db] MongoDB connected (${getMongoDbName()})`)
+      console.log(
+        `[db] MongoDB Atlas connected — ping ok (${getMongoDbName()})`,
+      )
       return db
     })().catch((error) => {
       mongoReady = false
@@ -116,7 +126,11 @@ async function ensureMongoIndexes(database) {
       { key: { email: 1 }, name: 'payments_email' },
     ]),
     database.collection('registrations').createIndexes([
-      { key: { tenantId: 1, email: 1 }, unique: true, name: 'registrations_tenant_email' },
+      {
+        key: { tenantId: 1, email: 1 },
+        unique: true,
+        name: 'registrations_tenant_email',
+      },
       { key: { email: 1 }, name: 'registrations_email' },
     ]),
     database.collection('settings').createIndexes([

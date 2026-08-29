@@ -503,6 +503,38 @@ export default function App() {
     setShowJoinForm(true)
   }
 
+  function finishAuthAndHidePopup({ paid, activeUser, digits }) {
+    const lockedEmail = (activeUser?.email || email).trim()
+    const lockedName = (activeUser?.name || name).trim()
+    if (lockedEmail) setEmail(lockedEmail)
+    if (lockedName) setName(lockedName)
+    if (activeUser?.phone) {
+      setPhone(String(activeUser.phone).replace(/\D/g, '').slice(-10))
+    }
+
+    if (paid) {
+      setSubscriptionActive(true)
+      setSubmitted({
+        name: lockedName || name || '',
+        email: lockedEmail,
+        phone: digits || activeUser?.phone || phone || '',
+        webinarLink: publicSettings.webinarLink || null,
+        emailSent: true,
+        emailError: null,
+        subscriptionType: 'lifetime',
+      })
+    }
+
+    // Auth done → return to main screen (hide Sign In / Sign Up popup)
+    setShowJoinForm(false)
+    setJoinStep('details')
+    setStatus('idle')
+    setMessage('')
+    pendingOrderRef.current = null
+    void refreshProfile()
+    void refreshSubscription()
+  }
+
   useEffect(() => {
     if (!user) {
       setSubscriptionActive(false)
@@ -560,6 +592,18 @@ export default function App() {
     loadRazorpayScript().catch(() => {})
     return undefined
   }, [showJoinForm, subscriptionActive])
+
+  // After Sign In / success popup is shown, auto-hide and return to main screen
+  useEffect(() => {
+    if (!showJoinForm || joinStep !== 'success') return undefined
+    const timer = window.setTimeout(() => {
+      setShowJoinForm(false)
+      setJoinStep('details')
+      setStatus('idle')
+      setMessage('')
+    }, 4000)
+    return () => window.clearTimeout(timer)
+  }, [showJoinForm, joinStep])
 
   useEffect(() => {
     function refreshWorkshop() {
@@ -650,7 +694,8 @@ export default function App() {
     if (user) {
       const paid = subscriptionActive || (await refreshSubscription())
       if (paid) {
-        openPaidLinksPopup()
+        // Already subscribed — stay on main screen, no popup
+        setSubscriptionActive(true)
         return
       }
       if (user.name) setName(user.name)
@@ -681,7 +726,8 @@ export default function App() {
     if (user) {
       const paid = subscriptionActive || (await refreshSubscription())
       if (paid) {
-        openPaidLinksPopup()
+        // Already signed in + subscribed — stay on main screen
+        setSubscriptionActive(true)
         return
       }
       if (user.name) setName(user.name)
@@ -777,6 +823,16 @@ export default function App() {
         })
       }
 
+      const paid =
+        activeUser.subscription?.status === 'active' &&
+        activeUser.subscription?.plan === 'lifetime'
+
+      if (paid) {
+        finishAuthAndHidePopup({ paid: true, activeUser, digits })
+        return
+      }
+
+      // New / unpaid account → stay in popup on payment step
       const lockedEmail = (activeUser.email || email).trim()
       const lockedName = (activeUser.name || name).trim()
       setEmail(lockedEmail)
@@ -784,26 +840,15 @@ export default function App() {
       if (activeUser.phone) {
         setPhone(String(activeUser.phone).replace(/\D/g, '').slice(-10))
       }
-
-      const paid =
-        activeUser.subscription?.status === 'active' &&
-        activeUser.subscription?.plan === 'lifetime'
-
-      if (paid) {
-        setSubscriptionActive(true)
-        openPaidLinksPopup()
-        return
-      }
-
       setStatus('idle')
       setMessage('')
       setJoinStep('payment')
+      setShowJoinForm(true)
       pendingOrderRef.current = createPaymentOrder({
         name: lockedName || name.trim(),
         email: lockedEmail,
         phone: digits || activeUser.phone || '',
       })
-      // Background sync only — do not block Sign In / Sign Up
       void refreshProfile()
       void refreshSubscription()
     } catch (err) {
