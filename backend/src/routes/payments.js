@@ -15,6 +15,12 @@ import {
 } from '../email.js'
 import { buildSubscription, isLifetimeActive } from '../subscription.js'
 import {
+  activateLifetimeSubscription,
+  getSubscriptionByUserId,
+  isLifetimeActiveForUser,
+  updateUserProfile,
+} from '../auth/userStore.js'
+import {
   formatAmountLabel,
   getWebinarLink,
   getWorkshopAmountPaise,
@@ -53,11 +59,11 @@ function validateLead(body) {
   }
 
   const digits = phone.replace(/\D/g, '')
-  if (digits.length !== 10) {
+  if (digits && digits.length !== 10) {
     return { error: 'Please enter a valid 10-digit mobile number.' }
   }
 
-  return { name, email, phone: digits }
+  return { name, email, phone: digits || null }
 }
 
 function assertAuthEmail(auth, email) {
@@ -87,16 +93,23 @@ async function finalizePaidSeat({
   ])
   const amountLabel = formatAmountLabel(amountPaise)
 
-  // Always bind to authenticated uid tenant (no guest split DB).
+  // Always bind to authenticated userId tenant (no guest split DB).
   await touchLogin({
     uid: auth.uid,
     email: auth.email,
     name: auth.name || lead.name,
     picture: auth.picture || null,
-    provider: auth.provider || 'google.com',
+    provider: auth.provider || 'local',
     emailVerified: auth.emailVerified,
     phone: lead.phone,
   })
+
+  if (auth.userId) {
+    await updateUserProfile(auth.userId, {
+      name: lead.name || auth.name,
+      phone: lead.phone,
+    }).catch(() => undefined)
+  }
 
   const saved = await recordPayment(
     {
@@ -104,7 +117,7 @@ async function finalizePaidSeat({
       email: auth.email,
       name: lead.name || auth.name,
       phone: lead.phone,
-      provider: auth.provider || 'google.com',
+      provider: auth.provider || 'local',
       emailVerified: auth.emailVerified,
     },
     {
@@ -117,6 +130,12 @@ async function finalizePaidSeat({
       webinarLink: webinarLink || null,
     },
   )
+
+  if (auth.userId && !saved.alreadyRecorded) {
+    await activateLifetimeSubscription(auth.userId)
+  } else if (auth.userId && saved.alreadyRecorded) {
+    await activateLifetimeSubscription(auth.userId).catch(() => undefined)
+  }
 
   let emailError = null
 
@@ -163,6 +182,13 @@ paymentsRouter.post('/create-order', requireAuth, async (req, res, next) => {
 
     assertAuthEmail(req.auth, lead.email)
 
+    if (req.auth.userId) {
+      await updateUserProfile(req.auth.userId, {
+        name: lead.name,
+        phone: lead.phone,
+      }).catch(() => undefined)
+    }
+
     const login = await touchLogin({
       uid: req.auth.uid,
       email: req.auth.email,
@@ -174,8 +200,16 @@ paymentsRouter.post('/create-order', requireAuth, async (req, res, next) => {
     })
 
     const own = await getOwnProfile(login.tenantId)
-    const subscription = buildSubscription(own.profile, own.paymentCount)
-    if (isLifetimeActive(own.profile, own.paymentCount)) {
+    const subFromUser = req.auth.userId
+      ? await getSubscriptionByUserId(req.auth.userId)
+      : null
+    const subscription =
+      subFromUser || buildSubscription(own.profile, own.paymentCount)
+    const alreadyLifetime = req.auth.userId
+      ? await isLifetimeActiveForUser(req.auth.userId)
+      : isLifetimeActive(own.profile, own.paymentCount)
+
+    if (alreadyLifetime) {
       return res.status(409).json({
         message:
           'You already have a permanent lifetime subscription on this account.',
@@ -273,10 +307,9 @@ paymentsRouter.post('/verify', requireAuth, async (req, res, next) => {
       sendEmail: true,
     })
 
-    const subscription = buildSubscription(
-      result.saved.profile,
-      result.alreadyRecorded ? 1 : 1,
-    )
+    const subscription = req.auth.userId
+      ? await getSubscriptionByUserId(req.auth.userId)
+      : buildSubscription(result.saved.profile, 1)
 
     return res.status(200).json({
       message: result.alreadyRecorded
@@ -345,7 +378,8 @@ paymentsRouter.post('/webhook', async (req, res) => {
       .trim()
       .toLowerCase()
     const name = String(notes.name || 'Participant').trim()
-    const phone = String(notes.phone || '').replace(/\D/g, '')
+    const phoneRaw = String(notes.phone || '').replace(/\D/g, '')
+    const phone = phoneRaw.length === 10 ? phoneRaw : null
 
     if (!uid || !email) {
       console.warn('[payments/webhook] missing uid/email notes', {
@@ -357,17 +391,18 @@ paymentsRouter.post('/webhook', async (req, res) => {
 
     const result = await finalizePaidSeat({
       auth: {
+        userId: uid,
         uid,
         email,
         name,
         picture: null,
-        provider: 'google.com',
+        provider: 'local',
         emailVerified: true,
       },
       lead: {
         name,
         email,
-        phone: phone.length === 10 ? phone : '0000000000',
+        phone,
       },
       orderId,
       paymentId,

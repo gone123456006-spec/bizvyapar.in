@@ -4,18 +4,20 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react'
 import { apiUrl } from '../lib/api.js'
 import { getTrackingIds } from '../lib/visitorTracking.js'
 
 const AuthContext = createContext(null)
-const TOKEN_KEY = 'bv_access_token'
+const ACCESS_KEY = 'bv_access_token'
+const REFRESH_KEY = 'bv_refresh_token'
 const USER_KEY = 'bv_auth_user'
 
-function readStoredToken() {
+function readStored(key) {
   try {
-    return localStorage.getItem(TOKEN_KEY) || null
+    return localStorage.getItem(key) || null
   } catch {
     return null
   }
@@ -30,19 +32,40 @@ function readStoredUser() {
   }
 }
 
-function persistSession(token, user) {
+function persistSession({ accessToken, refreshToken, user }) {
   try {
-    if (token) localStorage.setItem(TOKEN_KEY, token)
-    else localStorage.removeItem(TOKEN_KEY)
+    if (accessToken) localStorage.setItem(ACCESS_KEY, accessToken)
+    else if (accessToken === null) localStorage.removeItem(ACCESS_KEY)
+
+    if (refreshToken) localStorage.setItem(REFRESH_KEY, refreshToken)
+    else if (refreshToken === null) localStorage.removeItem(REFRESH_KEY)
+
     if (user) localStorage.setItem(USER_KEY, JSON.stringify(user))
-    else localStorage.removeItem(USER_KEY)
+    else if (user === null) localStorage.removeItem(USER_KEY)
   } catch {
     // ignore quota / private mode
   }
 }
 
+function mapUserPayload(data) {
+  const u = data.user || {}
+  const userId = u.userId || u.id || u.uid || null
+  return {
+    userId,
+    uid: userId,
+    email: u.email || null,
+    name: u.name || null,
+    phone: u.phone || null,
+    picture: null,
+    emailVerified: Boolean(u.emailVerified),
+    provider: u.provider || 'local',
+    tenantId: u.tenantId || null,
+    subscription: data.subscription || u.subscription || null,
+  }
+}
+
 export async function getAccessToken() {
-  return readStoredToken()
+  return readStored(ACCESS_KEY)
 }
 
 export function AuthProvider({ children }) {
@@ -50,85 +73,140 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
   const [signingIn, setSigningIn] = useState(false)
   const [error, setError] = useState('')
+  const refreshTimerRef = useRef(null)
+  const refreshAccessTokenRef = useRef(null)
 
-  const applySession = useCallback((token, nextUser) => {
-    persistSession(token, nextUser)
+  const clearSession = useCallback(() => {
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current)
+      refreshTimerRef.current = null
+    }
+    persistSession({ accessToken: null, refreshToken: null, user: null })
+    setUser(null)
+  }, [])
+
+  const applySession = useCallback((accessToken, refreshToken, nextUser) => {
+    persistSession({
+      accessToken,
+      refreshToken,
+      user: nextUser,
+    })
     setUser(nextUser)
   }, [])
 
+  const scheduleRefresh = useCallback((expiresInSeconds) => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
+    const ms = Math.max(
+      30_000,
+      (Number(expiresInSeconds) || 900) * 1000 - 60_000,
+    )
+    refreshTimerRef.current = setTimeout(() => {
+      void refreshAccessTokenRef.current?.().catch(() => undefined)
+    }, ms)
+  }, [])
+
+  const refreshAccessToken = useCallback(async () => {
+    const refreshToken = readStored(REFRESH_KEY)
+    if (!refreshToken) {
+      clearSession()
+      return null
+    }
+
+    const res = await fetch(apiUrl('/api/auth/refresh'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+      cache: 'no-store',
+    })
+
+    if (!res.ok) {
+      clearSession()
+      return null
+    }
+
+    const data = await res.json()
+    if (!data.accessToken || !data.refreshToken) {
+      clearSession()
+      return null
+    }
+
+    const nextUser = mapUserPayload(data)
+    applySession(data.accessToken, data.refreshToken, nextUser)
+    scheduleRefresh(data.expiresIn)
+    return nextUser
+  }, [applySession, clearSession, scheduleRefresh])
+
+  refreshAccessTokenRef.current = refreshAccessToken
+
   const refreshProfile = useCallback(async () => {
-    const token = readStoredToken()
+    let token = readStored(ACCESS_KEY)
+    if (!token && readStored(REFRESH_KEY)) {
+      const refreshed = await refreshAccessToken()
+      if (!refreshed) return null
+      token = readStored(ACCESS_KEY)
+    }
     if (!token) {
       setUser(null)
       return null
     }
 
-    const res = await fetch(apiUrl('/api/auth/me'), {
+    let res = await fetch(apiUrl('/api/auth/me'), {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
     })
 
+    if (res.status === 401) {
+      const refreshed = await refreshAccessToken()
+      if (!refreshed) return null
+      token = readStored(ACCESS_KEY)
+      res = await fetch(apiUrl('/api/auth/me'), {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      })
+    }
+
     if (!res.ok) {
-      persistSession(null, null)
-      setUser(null)
+      clearSession()
       return null
     }
 
     const data = await res.json()
-    const nextUser = {
-      uid: data.user?.uid,
-      email: data.user?.email || null,
-      name: data.user?.name || null,
-      phone: data.user?.phone || null,
-      picture: data.user?.picture || null,
-      emailVerified: Boolean(data.user?.emailVerified),
-      provider: data.user?.provider || 'local',
-      tenantId: data.user?.tenantId || null,
-      subscription: data.subscription || data.user?.subscription || null,
-    }
-    applySession(token, nextUser)
+    const nextUser = mapUserPayload(data)
+    applySession(token, readStored(REFRESH_KEY), nextUser)
     return nextUser
-  }, [applySession])
+  }, [applySession, clearSession, refreshAccessToken])
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       try {
-        if (readStoredToken()) {
+        if (readStored(ACCESS_KEY) || readStored(REFRESH_KEY)) {
           await refreshProfile()
         }
       } catch {
-        if (!cancelled) {
-          persistSession(null, null)
-          setUser(null)
-        }
+        if (!cancelled) clearSession()
       } finally {
         if (!cancelled) setLoading(false)
       }
     })()
     return () => {
       cancelled = true
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
     }
-  }, [refreshProfile])
+  }, [refreshProfile, clearSession])
 
-  /**
-   * Create or restore account with name + email + phone.
-   * Returns the signed-in user object.
-   */
-  async function signInWithDetails({ name, email, phone }) {
+  async function authRequest(path, body) {
     setSigningIn(true)
     setError('')
     try {
       const ids = getTrackingIds()
       let res
       try {
-        res = await fetch(apiUrl('/api/auth/login'), {
+        res = await fetch(apiUrl(path), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            name,
-            email,
-            phone,
+            ...body,
             sessionId: ids.sessionId,
             visitorId: ids.visitorId,
           }),
@@ -144,30 +222,22 @@ export function AuthProvider({ children }) {
         throw new Error(
           data.message ||
             (res.status === 404
-              ? 'Sign-in service is updating. Please try again in a minute.'
-              : `Could not sign in (${res.status}). Please try again.`),
+              ? 'Auth service is updating. Please try again in a minute.'
+              : `Could not continue (${res.status}). Please try again.`),
         )
       }
 
-      if (!data.accessToken || !data.user?.uid) {
-        throw new Error('Sign-in response was incomplete. Please try again.')
+      const userId = data.user?.userId || data.user?.uid || data.user?.id
+      if (!data.accessToken || !data.refreshToken || !userId) {
+        throw new Error('Auth response was incomplete. Please try again.')
       }
 
-      const nextUser = {
-        uid: data.user.uid,
-        email: data.user.email || null,
-        name: data.user.name || null,
-        phone: data.user.phone || null,
-        picture: null,
-        emailVerified: true,
-        provider: 'local',
-        tenantId: data.user.tenantId || null,
-        subscription: data.subscription || data.user.subscription || null,
-      }
-      applySession(data.accessToken, nextUser)
+      const nextUser = mapUserPayload(data)
+      applySession(data.accessToken, data.refreshToken, nextUser)
+      scheduleRefresh(data.expiresIn)
       return nextUser
     } catch (err) {
-      const message = err.message || 'Sign in failed.'
+      const message = err.message || 'Authentication failed.'
       setError(message)
       throw err
     } finally {
@@ -175,24 +245,35 @@ export function AuthProvider({ children }) {
     }
   }
 
+  async function register({ name, email, password, phone }) {
+    return authRequest('/api/auth/register', { name, email, password, phone })
+  }
+
+  async function login({ email, password }) {
+    return authRequest('/api/auth/login', { email, password })
+  }
+
   async function signOut() {
     try {
-      const token = readStoredToken()
+      const token = readStored(ACCESS_KEY)
+      const refreshToken = readStored(REFRESH_KEY)
       const ids = getTrackingIds()
-      if (token) {
+      if (token || refreshToken) {
         void fetch(apiUrl('/api/auth/logout'), {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${token}`,
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ sessionId: ids.sessionId }),
+          body: JSON.stringify({
+            refreshToken,
+            sessionId: ids.sessionId,
+          }),
           keepalive: true,
         }).catch(() => null)
       }
     } finally {
-      persistSession(null, null)
-      setUser(null)
+      clearSession()
       setError('')
     }
   }
@@ -203,12 +284,14 @@ export function AuthProvider({ children }) {
       loading,
       signingIn,
       error,
-      signInWithDetails,
+      register,
+      login,
       signOut,
       refreshProfile,
+      refreshAccessToken,
       isConfigured: true,
     }),
-    [user, loading, signingIn, error, refreshProfile],
+    [user, loading, signingIn, error, refreshProfile, refreshAccessToken],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

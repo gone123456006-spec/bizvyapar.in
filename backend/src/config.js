@@ -43,12 +43,16 @@ export function getRuntimeStatus() {
   const firebase = Boolean(process.env.FIREBASE_PROJECT_ID)
   const webinarLink = Boolean(String(process.env.WEBINAR_LINK || '').trim())
   const cors = getAllowedOrigins().length > 0
+  const database = Boolean(String(process.env.DATABASE_URL || '').trim())
+  const authJwt = Boolean(String(process.env.AUTH_JWT_SECRET || '').trim())
 
   const missing = []
   if (!razorpay) missing.push('RAZORPAY_KEY_ID/RAZORPAY_KEY_SECRET')
   if (!email) missing.push('SMTP_USER/SMTP_PASS')
   if (!webinarLink) missing.push('WEBINAR_LINK')
   if (!cors) missing.push('CORS_ORIGIN')
+  if (!database) missing.push('DATABASE_URL')
+  if (!authJwt) missing.push('AUTH_JWT_SECRET')
 
   return {
     razorpay,
@@ -56,7 +60,9 @@ export function getRuntimeStatus() {
     firebase,
     webinarLink,
     cors,
-    ready: razorpay && email && webinarLink && cors,
+    database,
+    authJwt,
+    ready: razorpay && email && webinarLink && cors && database && authJwt,
     missing,
   }
 }

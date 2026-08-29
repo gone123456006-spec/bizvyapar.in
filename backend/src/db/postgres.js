@@ -138,6 +138,78 @@ export async function initPostgres() {
       )
   `)
 
+  // Secure auth: users (UUID identity), refresh tokens, subscriptions by user_id
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id UUID PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      name TEXT NOT NULL,
+      phone TEXT,
+      email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+      provider TEXT NOT NULL DEFAULT 'local',
+      status TEXT NOT NULL DEFAULT 'active',
+      failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+      locked_until TIMESTAMPTZ,
+      last_login_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS users_email_lower_idx ON users (LOWER(email));
+
+    CREATE TABLE IF NOT EXISTS refresh_tokens (
+      id UUID PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      revoked_at TIMESTAMPTZ,
+      user_agent TEXT,
+      ip TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS refresh_tokens_user_idx ON refresh_tokens(user_id);
+    CREATE INDEX IF NOT EXISTS refresh_tokens_hash_idx ON refresh_tokens(token_hash);
+
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      id UUID PRIMARY KEY,
+      user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      plan TEXT,
+      status TEXT NOT NULL DEFAULT 'none',
+      expires_at TIMESTAMPTZ,
+      activated_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS subscriptions_user_idx ON subscriptions(user_id);
+    CREATE INDEX IF NOT EXISTS subscriptions_status_idx ON subscriptions(status);
+  `)
+
+  // Backfill lifetime subscriptions from paid profiles (uid matches users.id)
+  await db.query(`
+    INSERT INTO subscriptions (id, user_id, plan, status, expires_at, activated_at, created_at, updated_at)
+    SELECT gen_random_uuid(), u.id, 'lifetime', 'active', NULL,
+           COALESCE(p.subscription_activated_at, p.updated_at, NOW()), NOW(), NOW()
+    FROM users u
+    INNER JOIN profiles p ON p.uid = u.id::text
+    WHERE (
+        p.subscription_status = 'active'
+        OR p.status = 'paid'
+      )
+      AND COALESCE(p.subscription_status, 'none') <> 'revoked'
+    ON CONFLICT (user_id) DO UPDATE SET
+      plan = 'lifetime',
+      status = 'active',
+      expires_at = NULL,
+      activated_at = COALESCE(subscriptions.activated_at, EXCLUDED.activated_at),
+      updated_at = NOW()
+    WHERE COALESCE(subscriptions.status, 'none') <> 'revoked'
+  `).catch((error) => {
+    console.warn('[db] subscription backfill skipped:', error.message)
+  })
+
   console.log('[db] Postgres schema ready')
   return { enabled: true }
 }

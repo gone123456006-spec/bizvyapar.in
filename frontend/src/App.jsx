@@ -346,7 +346,7 @@ function loadRazorpayScript() {
 async function createPaymentOrder(lead) {
   const token = await getAccessToken()
   if (!token) {
-    throw new Error('Please enter your details to continue payment.')
+    throw new Error('Please create an account or sign in to continue payment.')
   }
 
   let orderRes
@@ -403,11 +403,13 @@ function FieldIcon({ filled, children }) {
 
 export default function App() {
   const navigate = useNavigate()
-  const { user, signingIn, error, signInWithDetails, signOut } = useAuth()
+  const { user, signingIn, register, login, signOut, refreshProfile } =
+    useAuth()
   const publicSettings = usePublicSettings(4000)
   const amountLabel = publicSettings.amountLabel || '₹1'
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [phone, setPhone] = useState('')
   const [consent, setConsent] = useState(true)
   const [status, setStatus] = useState('idle')
@@ -434,30 +436,43 @@ export default function App() {
         return false
       }
 
-      const res = await fetch(apiUrl('/api/profile/me'), {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store',
-      })
-      if (!res.ok) return false
+      const [subRes, profileRes] = await Promise.all([
+        fetch(apiUrl('/api/auth/subscription'), {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        }),
+        fetch(apiUrl('/api/profile/me'), {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        }),
+      ])
 
-      const data = await res.json()
-      const latest = data.summary?.latestPayment || null
-      const subscription = data.subscription || null
+      if (!subRes.ok) {
+        setSubscriptionActive(false)
+        return false
+      }
+
+      const subData = await subRes.json()
+      const subscription = subData.subscription || null
       const paid =
-        subscription?.status === 'active' ||
-        data.profile?.subscriptionStatus === 'active' ||
-        data.profile?.status === 'paid' ||
-        Number(data.summary?.paymentCount || 0) > 0 ||
-        latest?.status === 'paid'
+        subscription?.status === 'active' && subscription?.plan === 'lifetime'
 
       if (!paid) {
         setSubscriptionActive(false)
         return false
       }
 
-      const paidName = data.profile?.name || name || user?.name || ''
-      const paidEmail = data.profile?.email || email || user?.email || ''
-      const paidPhone = data.profile?.phone || phone || ''
+      let latest = null
+      let profile = null
+      if (profileRes.ok) {
+        const data = await profileRes.json()
+        latest = data.summary?.latestPayment || null
+        profile = data.profile || null
+      }
+
+      const paidName = profile?.name || name || user?.name || ''
+      const paidEmail = profile?.email || email || user?.email || ''
+      const paidPhone = profile?.phone || phone || user?.phone || ''
 
       setSubscriptionActive(true)
       setSubmitted({
@@ -468,7 +483,7 @@ export default function App() {
           latest?.webinarLink || publicSettings.webinarLink || null,
         emailSent: true,
         emailError: null,
-        subscriptionType: subscription?.type || 'lifetime',
+        subscriptionType: subscription?.plan || 'lifetime',
       })
       if (paidName) setName(paidName)
       if (paidEmail) setEmail(paidEmail)
@@ -641,9 +656,46 @@ export default function App() {
       if (user.phone) {
         setPhone(String(user.phone).replace(/\D/g, '').slice(-10))
       }
+      setJoinStep('payment')
+      setStatus('idle')
+      setSubmitted(null)
+      setShowJoinForm(true)
+      return
     }
 
+    setPassword('')
     setJoinStep('details')
+    setStatus('idle')
+    setSubmitted(null)
+    setShowJoinForm(true)
+  }
+
+  async function openSignInForm(event) {
+    if (event) event.preventDefault()
+    setShowProfileMenu(false)
+    setMessage('')
+    pendingOrderRef.current = null
+
+    if (user) {
+      const paid = subscriptionActive || (await refreshSubscription())
+      if (paid) {
+        openPaidLinksPopup()
+        return
+      }
+      if (user.name) setName(user.name)
+      if (user.email) setEmail(user.email)
+      if (user.phone) {
+        setPhone(String(user.phone).replace(/\D/g, '').slice(-10))
+      }
+      setJoinStep('payment')
+      setStatus('idle')
+      setSubmitted(null)
+      setShowJoinForm(true)
+      return
+    }
+
+    setPassword('')
+    setJoinStep('login')
     setStatus('idle')
     setSubmitted(null)
     setShowJoinForm(true)
@@ -698,9 +750,15 @@ export default function App() {
     }
 
     const digits = phone.replace(/\D/g, '')
-    if (digits.length !== 10) {
+    if (digits && digits.length !== 10) {
       setStatus('error')
       setMessage('Please enter a valid 10-digit mobile number.')
+      return
+    }
+
+    if (!user && password.length < 8) {
+      setStatus('error')
+      setMessage('Password must be at least 8 characters.')
       return
     }
 
@@ -711,30 +769,86 @@ export default function App() {
     }
 
     try {
-      setMessage('Saving your details…')
-      const activeUser = await signInWithDetails({
-        name: name.trim(),
-        email: email.trim(),
-        phone,
-      })
+      let activeUser = user
+      if (!activeUser) {
+        setMessage('Creating your account…')
+        activeUser = await register({
+          name: name.trim(),
+          email: email.trim(),
+          password,
+          phone: digits || undefined,
+        })
+      }
 
       const lockedEmail = (activeUser.email || email).trim()
       const lockedName = (activeUser.name || name).trim()
       setEmail(lockedEmail)
       setName(lockedName)
-      if (activeUser.phone) setPhone(String(activeUser.phone).replace(/\D/g, '').slice(-10))
+      if (activeUser.phone) {
+        setPhone(String(activeUser.phone).replace(/\D/g, '').slice(-10))
+      }
 
       setStatus('idle')
       setMessage('')
+      setPassword('')
       setJoinStep('payment')
       pendingOrderRef.current = createPaymentOrder({
         name: lockedName,
         email: lockedEmail,
-        phone,
+        phone: digits || activeUser.phone || '',
       })
-    } catch (error) {
+    } catch (err) {
       setStatus('error')
-      setMessage(error.message || 'Could not save your details. Please try again.')
+      setMessage(err.message || 'Could not create account. Please try again.')
+    }
+  }
+
+  async function handleLoginSubmit(event) {
+    event.preventDefault()
+    setStatus('loading')
+    setMessage('')
+
+    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setStatus('error')
+      setMessage('Please enter a valid email.')
+      return
+    }
+    if (!password) {
+      setStatus('error')
+      setMessage('Please enter your password.')
+      return
+    }
+
+    try {
+      setMessage('Signing in…')
+      const activeUser = await login({
+        email: email.trim(),
+        password,
+      })
+      setName(activeUser.name || name)
+      setEmail(activeUser.email || email)
+      if (activeUser.phone) {
+        setPhone(String(activeUser.phone).replace(/\D/g, '').slice(-10))
+      }
+      setPassword('')
+
+      const paid =
+        (activeUser.subscription?.status === 'active' &&
+          activeUser.subscription?.plan === 'lifetime') ||
+        (await refreshSubscription())
+
+      if (paid) {
+        openPaidLinksPopup()
+        return
+      }
+
+      setStatus('idle')
+      setMessage('')
+      setJoinStep('payment')
+      void refreshProfile()
+    } catch (err) {
+      setStatus('error')
+      setMessage(err.message || 'Invalid email or password.')
     }
   }
 
@@ -748,19 +862,17 @@ export default function App() {
     setMessage('')
 
     try {
-      let activeUser = user
+      const activeUser = user
       if (!activeUser) {
-        setMessage('Saving your details…')
-        activeUser = await signInWithDetails({
-          name: name.trim(),
-          email: email.trim(),
-          phone,
-        })
+        setStatus('error')
+        setMessage('Please create an account or sign in first.')
+        setJoinStep('details')
+        return
       }
 
       const payName = (name || activeUser.name || '').trim()
       const payEmail = (activeUser.email || email || '').trim()
-      const payPhone = phone.trim()
+      const payPhone = phone.trim() || activeUser.phone || ''
 
       if (activeUser.email && activeUser.email !== email) {
         setEmail(activeUser.email)
@@ -982,7 +1094,7 @@ export default function App() {
               <button
                 className="nav-signin"
                 type="button"
-                onClick={openJoinForm}
+                onClick={openSignInForm}
                 disabled={signingIn}
               >
                 {signingIn ? 'Signing in…' : 'Sign In'}
@@ -1003,7 +1115,7 @@ export default function App() {
                 type="button"
                 onClick={() => {
                   if (!user) {
-                    void openJoinForm()
+                    void openSignInForm()
                     return
                   }
                   setShowProfileMenu((open) => !open)
@@ -1768,9 +1880,7 @@ export default function App() {
                       ? message?.includes('Confirming')
                         ? 'Confirming payment…'
                         : 'Please wait…'
-                      : user
-                        ? 'Pay Now · Join'
-                        : 'Sign in & Pay Now'}
+                      : 'Pay Now · Join'}
                   </button>
 
                   <p className="form-note">
@@ -1791,11 +1901,87 @@ export default function App() {
                     ← Back to details
                   </button>
                 </>
+              ) : joinStep === 'login' ? (
+                <>
+                  <h2 id="join-form-title">Sign in</h2>
+                  <p className="join-sub">
+                    Use your email and password to access your account.
+                  </p>
+
+                  <form className="join-form" onSubmit={handleLoginSubmit} noValidate>
+                    <label className="pill-field">
+                      <span className="sr-only">Email</span>
+                      <input
+                        type="email"
+                        name="email"
+                        autoComplete="email"
+                        placeholder="Email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
+                      />
+                      <FieldIcon filled={email.trim().length > 0}>
+                        <svg viewBox="0 0 24 24" focusable="false">
+                          <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4-8 5-8-5V6l8 5 8-5v2z" />
+                        </svg>
+                      </FieldIcon>
+                    </label>
+
+                    <label className="pill-field">
+                      <span className="sr-only">Password</span>
+                      <input
+                        type="password"
+                        name="password"
+                        autoComplete="current-password"
+                        placeholder="Password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                      />
+                      <FieldIcon filled={password.length > 0}>
+                        <svg viewBox="0 0 24 24" focusable="false">
+                          <path d="M12 17a2 2 0 100-4 2 2 0 000 4zm6-6h-1V9a5 5 0 00-10 0v2H6a2 2 0 00-2 2v7a2 2 0 002 2h12a2 2 0 002-2v-7a2 2 0 00-2-2zm-3 0H9V9a3 3 0 016 0v2z" />
+                        </svg>
+                      </FieldIcon>
+                    </label>
+
+                    {status === 'error' && (
+                      <p className="form-error" role="alert">
+                        {message}
+                      </p>
+                    )}
+
+                    <button
+                      className="btn-trial"
+                      type="submit"
+                      disabled={status === 'loading' || signingIn}
+                    >
+                      {status === 'loading' || signingIn ? 'Signing in…' : 'Sign in'}
+                    </button>
+
+                    <p className="form-note">
+                      New here?{' '}
+                      <button
+                        type="button"
+                        className="form-terms-link"
+                        style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer' }}
+                        onClick={() => {
+                          setStatus('idle')
+                          setMessage('')
+                          setPassword('')
+                          setJoinStep('details')
+                        }}
+                      >
+                        Create an account
+                      </button>
+                    </p>
+                  </form>
+                </>
               ) : (
                 <>
-                  <h2 id="join-form-title">Reserve your free seat</h2>
+                  <h2 id="join-form-title">Create your account</h2>
                   <p className="join-sub">
-                    Enter your details and we will send the webinar link.
+                    Register with email and password. Phone is optional.
                   </p>
 
                   <form className="join-form" onSubmit={handleDetailsNext} noValidate>
@@ -1823,7 +2009,7 @@ export default function App() {
                         type="email"
                         name="email"
                         autoComplete="email"
-                        placeholder="Email"
+                        placeholder="Email / Gmail"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         required
@@ -1831,6 +2017,25 @@ export default function App() {
                       <FieldIcon filled={email.trim().length > 0}>
                         <svg viewBox="0 0 24 24" focusable="false">
                           <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4-8 5-8-5V6l8 5 8-5v2z" />
+                        </svg>
+                      </FieldIcon>
+                    </label>
+
+                    <label className="pill-field">
+                      <span className="sr-only">Password</span>
+                      <input
+                        type="password"
+                        name="password"
+                        autoComplete="new-password"
+                        placeholder="Password (min 8 characters)"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                        minLength={8}
+                      />
+                      <FieldIcon filled={password.length >= 8}>
+                        <svg viewBox="0 0 24 24" focusable="false">
+                          <path d="M12 17a2 2 0 100-4 2 2 0 000 4zm6-6h-1V9a5 5 0 00-10 0v2H6a2 2 0 00-2 2v7a2 2 0 002 2h12a2 2 0 002-2v-7a2 2 0 00-2-2zm-3 0H9V9a3 3 0 016 0v2z" />
                         </svg>
                       </FieldIcon>
                     </label>
@@ -1845,7 +2050,7 @@ export default function App() {
                         type="tel"
                         name="phone"
                         autoComplete="tel"
-                        placeholder="10-digit mobile"
+                        placeholder="Optional"
                         value={phone}
                         onChange={(e) => setPhone(e.target.value)}
                       />
@@ -1876,12 +2081,31 @@ export default function App() {
                       </p>
                     )}
 
-                    <button className="btn-trial" type="submit">
-                      Next &gt;
+                    <button
+                      className="btn-trial"
+                      type="submit"
+                      disabled={status === 'loading' || signingIn}
+                    >
+                      {status === 'loading' || signingIn
+                        ? 'Creating account…'
+                        : 'Next >'}
                     </button>
 
                     <p className="form-note">
-                      Next step: payment to confirm your seat.
+                      Already have an account?{' '}
+                      <button
+                        type="button"
+                        className="form-terms-link"
+                        style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer' }}
+                        onClick={() => {
+                          setStatus('idle')
+                          setMessage('')
+                          setPassword('')
+                          setJoinStep('login')
+                        }}
+                      >
+                        Sign in
+                      </button>
                     </p>
                     <a
                       className="form-terms-link"
