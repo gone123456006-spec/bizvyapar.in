@@ -9,6 +9,7 @@ import {
   revokeAllRefreshTokensForUser,
   revokeRefreshToken,
   rotateRefreshToken,
+  signInWithDetails,
   updateUserProfile,
 } from '../auth/userStore.js'
 import {
@@ -26,18 +27,10 @@ function clientIp(req) {
   return forwarded || req.ip || req.socket?.remoteAddress || ''
 }
 
-/** Never leak SQL / infra / password wording to clients. */
+/** Never leak SQL / infra wording to clients. */
 function userFacingAuthError(error, fallback = 'Something went wrong. Please try again.') {
   const raw = String(error?.message || '')
   const code = error?.code
-
-  // Password system is removed — never surface password errors
-  if (/password/i.test(raw)) {
-    return {
-      status: error?.status && error.status >= 400 ? error.status : 400,
-      message: 'No password needed. Use your Gmail and mobile number to continue.',
-    }
-  }
 
   // Keep intentional auth guidance messages
   if (
@@ -48,6 +41,14 @@ function userFacingAuthError(error, fallback = 'Something went wrong. Please try
     return {
       status: error?.status && error.status >= 400 ? error.status : 400,
       message: raw,
+    }
+  }
+
+  // Legacy password column / wording — treat as soft infra issue, not user fault
+  if (/password/i.test(raw)) {
+    return {
+      status: 503,
+      message: 'Account service is updating. Please try again in a moment.',
     }
   }
 
@@ -165,6 +166,24 @@ authRouter.post('/register', authRateLimit(), (req, res) =>
 /** POST /api/auth/login — Sign In (Gmail + mobile only) */
 authRouter.post('/login', authRateLimit(), (req, res) =>
   completeAuth(req, res, loginWithEmailPhone),
+)
+
+/** POST /api/auth/continue — simple create-or-sign-in (name optional if account exists) */
+authRouter.post('/continue', authRateLimit(), (req, res) =>
+  completeAuth(req, res, async ({ name, email, phone }) => {
+    try {
+      return await signInWithDetails({ name, email, phone })
+    } catch (error) {
+      if (/full name/i.test(error.message || '')) {
+        try {
+          return await loginWithEmailPhone({ email, phone })
+        } catch {
+          throw error
+        }
+      }
+      throw error
+    }
+  }),
 )
 
 /** POST /api/auth/refresh — rotate refresh token, issue new access token */

@@ -187,9 +187,15 @@ export async function initPostgres() {
     CREATE INDEX IF NOT EXISTS subscriptions_status_idx ON subscriptions(status);
   `)
 
-  // Passwordless name+email+phone accounts
+  // Passwordless accounts — never require password_hash
   await db.query(`
     ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL
+  `).catch(() => undefined)
+  await db.query(`
+    ALTER TABLE users ALTER COLUMN password_hash SET DEFAULT ''
+  `).catch(() => undefined)
+  await db.query(`
+    UPDATE users SET password_hash = '' WHERE password_hash IS NULL
   `).catch(() => undefined)
 
   // Backfill lifetime subscriptions from paid profiles (uid matches users.id)

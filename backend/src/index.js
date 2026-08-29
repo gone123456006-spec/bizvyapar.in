@@ -5,7 +5,7 @@ import { getHost, getPort, getRuntimeStatus } from './config.js'
 import { migrateLegacySharedData } from './db/migrate.js'
 import { ensureDataLayout } from './db/paths.js'
 import { closePostgres, initPostgres, isPostgresEnabled } from './db/postgres.js'
-import { closeMongo, initMongo, isMongoEnabled } from './db/mongo.js'
+import { closeMongo, initMongo, isMongoConfigured, isMongoEnabled } from './db/mongo.js'
 import { ensureAnalyticsSchema } from './db/analyticsSchema.js'
 import { startReminderScheduler } from './db/reminders.js'
 
@@ -18,9 +18,7 @@ const allowFileTenants =
 
 await ensureDataLayout()
 
-const hasDurableDb = isMongoEnabled() || isPostgresEnabled()
-
-if (!hasDurableDb && (isRender || isProduction) && !allowFileTenants) {
+if (!isMongoConfigured() && !isPostgresEnabled() && (isRender || isProduction) && !allowFileTenants) {
   console.error(
     '[db] FATAL: MONGODB_URI (preferred) or DATABASE_URL is required on Render/production.',
   )
@@ -33,8 +31,19 @@ if (!hasDurableDb && (isRender || isProduction) && !allowFileTenants) {
   process.exit(1)
 }
 
+if (isMongoConfigured()) {
+  try {
+    await initMongo()
+  } catch (error) {
+    console.error(
+      '[db] MongoDB connection failed — falling back to Postgres if available:',
+      error.message,
+    )
+  }
+}
+
 if (isMongoEnabled()) {
-  await initMongo()
+  // Mongo is primary
 } else if (isPostgresEnabled()) {
   await initPostgres()
   await ensureAnalyticsSchema().catch((error) => {
@@ -42,11 +51,17 @@ if (isMongoEnabled()) {
   })
 } else {
   console.warn(
-    '[db] No MONGODB_URI / DATABASE_URL — using isolated file tenants (NOT durable on Render)',
+    '[db] No working MONGODB_URI / DATABASE_URL — using isolated file tenants (NOT durable on Render)',
   )
   await migrateLegacySharedData().catch((error) => {
     console.error('[db] legacy migration failed', error)
   })
+}
+
+const hasDurableDb = isMongoEnabled() || isPostgresEnabled()
+if (!hasDurableDb && (isRender || isProduction) && !allowFileTenants) {
+  console.error('[db] FATAL: Could not connect to MongoDB or Postgres.')
+  process.exit(1)
 }
 
 const reminderTimer = startReminderScheduler()

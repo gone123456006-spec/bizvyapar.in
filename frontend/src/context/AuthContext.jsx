@@ -67,21 +67,18 @@ function mapUserPayload(data) {
 function toUserAuthMessage(raw, fallback = 'Something went wrong. Please try again.') {
   const msg = String(raw || '').trim()
   if (!msg) return fallback
-  // Never show leftover password-auth messages (cached/old builds or API)
-  if (/password/i.test(msg)) {
-    return 'No password needed. Use your Gmail and mobile number to continue.'
-  }
   if (
-    /No account found|already exists|Please Sign (In|Up)|valid email|valid 10-digit|full name|Mobile number|Gmail and mobile/i.test(
+    /No account found|already exists|Please Sign (In|Up)|valid email|valid 10-digit|full name|Mobile number|Gmail and mobile|updating|try again/i.test(
       msg,
     )
   ) {
     return msg
   }
-  if (/duplicate key|unique constraint|tenants_email|users_email|SQLSTATE|ECONN|postgres/i.test(msg)) {
-    return 'Account already exists. Please Sign In.'
+  // Never show raw password / SQL errors to users
+  if (/password|duplicate key|unique constraint|tenants_email|users_email|SQLSTATE|ECONN|postgres|violates|constraint/i.test(msg)) {
+    return 'Could not continue. Please check your Gmail and mobile number, then try again.'
   }
-  if (/violates|constraint|internal server|stack|at Object\./i.test(msg)) {
+  if (/internal server|stack|at Object\./i.test(msg)) {
     return fallback
   }
   if (msg.length > 140) return fallback
@@ -278,23 +275,21 @@ export function AuthProvider({ children }) {
   }
 
   async function register({ name, email, phone }) {
-    try {
-      return await authRequest('/api/auth/register', { name, email, phone })
-    } catch (err) {
-      // Already registered → continue as Sign In so Sign Up never dead-ends
-      if (/already exists|Please Sign In/i.test(err.message || '')) {
-        return login({ email, phone })
-      }
-      throw err
-    }
+    // Simple path: create account, or continue if Gmail already exists
+    return authRequest('/api/auth/continue', { name, email, phone })
   }
 
-  async function login({ email, phone }) {
-    return authRequest('/api/auth/login', { email, phone })
+  async function login({ email, phone, name }) {
+    // Simple path: sign in, or create if details include name
+    return authRequest('/api/auth/continue', {
+      email,
+      phone,
+      ...(name ? { name } : {}),
+    })
   }
 
   async function signInWithDetails({ name, email, phone }) {
-    return register({ name, email, phone })
+    return authRequest('/api/auth/continue', { name, email, phone })
   }
 
   async function signOut() {

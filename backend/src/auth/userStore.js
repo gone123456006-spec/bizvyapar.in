@@ -363,7 +363,7 @@ export async function registerUser({ name, email, phone }) {
     const inserted = await client.query(
       `INSERT INTO users (
          id, email, password_hash, name, phone, email_verified, provider, status
-       ) VALUES ($1, $2, NULL, $3, $4, FALSE, 'local', 'active')
+       ) VALUES ($1, $2, '', $3, $4, FALSE, 'local', 'active')
        RETURNING *`,
       [userId, cleanEmail, cleanName, cleanPhone],
     )

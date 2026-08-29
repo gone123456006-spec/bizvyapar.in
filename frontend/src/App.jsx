@@ -403,7 +403,7 @@ function FieldIcon({ filled, children }) {
 
 export default function App() {
   const navigate = useNavigate()
-  const { user, signingIn, login, register, signOut, refreshProfile } =
+  const { user, signingIn, signInWithDetails, signOut, refreshProfile } =
     useAuth()
   const publicSettings = usePublicSettings(4000)
   const amountLabel = publicSettings.amountLabel || '₹1'
@@ -769,14 +769,12 @@ export default function App() {
       let activeUser = user
       if (!activeUser) {
         setMessage(authMode === 'signin' ? 'Signing in…' : 'Creating account…')
-        activeUser =
-          authMode === 'signin'
-            ? await login({ email: email.trim(), phone: digits })
-            : await register({
-                name: name.trim(),
-                email: email.trim(),
-                phone: digits,
-              })
+        // One simple continue API — creates or signs in
+        activeUser = await signInWithDetails({
+          name: name.trim() || undefined,
+          email: email.trim(),
+          phone: digits,
+        })
       }
 
       const lockedEmail = (activeUser.email || email).trim()
@@ -811,9 +809,7 @@ export default function App() {
     } catch (err) {
       setStatus('error')
       setMessage(
-        /password/i.test(err.message || '')
-          ? 'No password needed. Use your Gmail and mobile number to continue.'
-          : err.message || 'Could not continue. Please try again.',
+        err.message || 'Could not continue. Please try again.',
       )
     }
   }
@@ -1873,8 +1869,8 @@ export default function App() {
                   </h2>
                   <p className="join-sub">
                     {authMode === 'signin'
-                      ? 'Access your existing account with Gmail and mobile. No password.'
-                      : 'Create a new account with name, Gmail, and mobile. No password.'}
+                      ? 'Enter Gmail and mobile to access your account.'
+                      : 'Enter name, Gmail, and mobile to create your account.'}
                   </p>
 
                   <form
@@ -1946,9 +1942,7 @@ export default function App() {
 
                     {status === 'error' && message ? (
                       <p className="form-error" role="alert">
-                        {/password/i.test(message)
-                          ? 'No password needed. Use your Gmail and mobile number to continue.'
-                          : message}
+                        {message}
                       </p>
                     ) : null}
 

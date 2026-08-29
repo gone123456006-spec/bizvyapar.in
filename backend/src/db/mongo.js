@@ -7,6 +7,7 @@ import { MongoClient } from 'mongodb'
 let client = null
 let db = null
 let connecting = null
+let mongoReady = false
 
 export function getMongoUri() {
   return String(
@@ -14,8 +15,18 @@ export function getMongoUri() {
   ).trim()
 }
 
-export function isMongoEnabled() {
+/** URI present in env (may still fail to connect). */
+export function isMongoConfigured() {
   return Boolean(getMongoUri())
+}
+
+/** True only after a successful connection. */
+export function isMongoEnabled() {
+  return mongoReady && Boolean(db)
+}
+
+export function isMongoReady() {
+  return isMongoEnabled()
 }
 
 export function getMongoDbName() {
@@ -32,8 +43,8 @@ export function getMongoDbName() {
 }
 
 export async function initMongo() {
-  if (!isMongoEnabled()) return { enabled: false }
-  if (db) return { enabled: true, db }
+  if (!isMongoConfigured()) return { enabled: false }
+  if (db && mongoReady) return { enabled: true, db }
 
   if (!connecting) {
     connecting = (async () => {
@@ -44,10 +55,21 @@ export async function initMongo() {
       })
       await client.connect()
       db = client.db(getMongoDbName())
+      await db.command({ ping: 1 })
       await ensureMongoIndexes(db)
+      mongoReady = true
       console.log(`[db] MongoDB connected (${getMongoDbName()})`)
       return db
-    })()
+    })().catch((error) => {
+      mongoReady = false
+      db = null
+      connecting = null
+      if (client) {
+        void client.close().catch(() => undefined)
+        client = null
+      }
+      throw error
+    })
   }
 
   await connecting
@@ -55,8 +77,8 @@ export async function initMongo() {
 }
 
 export function getDb() {
-  if (!db) {
-    const error = new Error('MongoDB is not initialized. Set MONGODB_URI.')
+  if (!db || !mongoReady) {
+    const error = new Error('MongoDB is not connected.')
     error.status = 503
     throw error
   }
@@ -113,6 +135,7 @@ async function ensureMongoIndexes(database) {
 
 export async function closeMongo() {
   connecting = null
+  mongoReady = false
   db = null
   if (client) {
     await client.close().catch(() => undefined)
