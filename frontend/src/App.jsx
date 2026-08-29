@@ -692,7 +692,7 @@ export default function App() {
       return
     }
 
-    setJoinStep('login')
+    setJoinStep('details')
     setStatus('idle')
     setSubmitted(null)
     setShowJoinForm(true)
@@ -789,64 +789,6 @@ export default function App() {
     } catch (err) {
       setStatus('error')
       setMessage(err.message || 'Could not save your details. Please try again.')
-    }
-  }
-
-  async function handleLoginSubmit(event) {
-    event.preventDefault()
-    setStatus('loading')
-    setMessage('')
-
-    if (!name.trim()) {
-      setStatus('error')
-      setMessage('Please enter your name.')
-      return
-    }
-    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      setStatus('error')
-      setMessage('Please enter a valid email.')
-      return
-    }
-    const digits = phone.replace(/\D/g, '')
-    if (digits.length !== 10) {
-      setStatus('error')
-      setMessage('Please enter a valid 10-digit mobile number.')
-      return
-    }
-
-    try {
-      setMessage('Signing in…')
-      const activeUser = await signInWithDetails({
-        name: name.trim(),
-        email: email.trim(),
-        phone: digits,
-      })
-      setName(activeUser.name || name)
-      setEmail(activeUser.email || email)
-      if (activeUser.phone) {
-        setPhone(String(activeUser.phone).replace(/\D/g, '').slice(-10))
-      }
-
-      const paid =
-        (activeUser.subscription?.status === 'active' &&
-          activeUser.subscription?.plan === 'lifetime') ||
-        (await refreshSubscription())
-
-      if (paid) {
-        openPaidLinksPopup()
-        return
-      }
-
-      setStatus('idle')
-      setMessage('')
-      setJoinStep('payment')
-      void refreshProfile()
-    } catch (err) {
-      setStatus('error')
-      setMessage(
-        err.message ||
-          'Could not sign in. Use the same name, email, and mobile.',
-      )
     }
   }
 
@@ -1898,106 +1840,9 @@ export default function App() {
                     ← Back to details
                   </button>
                 </>
-              ) : joinStep === 'login' ? (
-                <>
-                  <h2 id="join-form-title">Sign in</h2>
-                  <p className="join-sub">
-                    Enter the same name, Gmail, and mobile you used before.
-                  </p>
-
-                  <form className="join-form" onSubmit={handleLoginSubmit} noValidate>
-                    <label className="pill-field">
-                      <span className="sr-only">Name</span>
-                      <input
-                        type="text"
-                        name="name"
-                        autoComplete="name"
-                        placeholder="Name"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        required
-                      />
-                      <FieldIcon filled={name.trim().length > 0}>
-                        <svg viewBox="0 0 24 24" focusable="false">
-                          <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
-                        </svg>
-                      </FieldIcon>
-                    </label>
-
-                    <label className="pill-field">
-                      <span className="sr-only">Email</span>
-                      <input
-                        type="email"
-                        name="email"
-                        autoComplete="email"
-                        placeholder="Email / Gmail"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        required
-                      />
-                      <FieldIcon filled={email.trim().length > 0}>
-                        <svg viewBox="0 0 24 24" focusable="false">
-                          <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4-8 5-8-5V6l8 5 8-5v2z" />
-                        </svg>
-                      </FieldIcon>
-                    </label>
-
-                    <label className="pill-field pill-phone">
-                      <span className="phone-label">Phone</span>
-                      <span className="phone-prefix" aria-hidden="true">
-                        <span className="flag" />
-                        +91
-                      </span>
-                      <input
-                        type="tel"
-                        name="phone"
-                        autoComplete="tel"
-                        placeholder="10-digit mobile"
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
-                        required
-                      />
-                      <FieldIcon filled={phone.trim().length > 0}>
-                        <svg viewBox="0 0 24 24" focusable="false">
-                          <path d="M6.62 10.79a15.15 15.15 0 006.59 6.59l2.2-2.2a1 1 0 011.01-.24c1.12.37 2.33.57 3.58.57a1 1 0 011 1V20a1 1 0 01-1 1C10.4 21 3 13.6 3 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.25 1.02l-2.2 2.2z" />
-                        </svg>
-                      </FieldIcon>
-                    </label>
-
-                    {status === 'error' && (
-                      <p className="form-error" role="alert">
-                        {message}
-                      </p>
-                    )}
-
-                    <button
-                      className="btn-trial"
-                      type="submit"
-                      disabled={status === 'loading' || signingIn}
-                    >
-                      {status === 'loading' || signingIn ? 'Signing in…' : 'Sign in'}
-                    </button>
-
-                    <p className="form-note">
-                      New here?{' '}
-                      <button
-                        type="button"
-                        className="form-terms-link"
-                        style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer' }}
-                        onClick={() => {
-                          setStatus('idle')
-                          setMessage('')
-                          setJoinStep('details')
-                        }}
-                      >
-                        Create an account
-                      </button>
-                    </p>
-                  </form>
-                </>
               ) : (
                 <>
-                  <h2 id="join-form-title">Reserve your seat</h2>
+                  <h2 id="join-form-title">Sign in</h2>
                   <p className="join-sub">
                     Enter your name, Gmail, and mobile number.
                   </p>
@@ -2050,9 +1895,9 @@ export default function App() {
                         name="phone"
                         autoComplete="tel"
                         placeholder="10-digit mobile"
-                        required
                         value={phone}
                         onChange={(e) => setPhone(e.target.value)}
+                        required
                       />
                       <FieldIcon filled={phone.trim().length > 0}>
                         <svg viewBox="0 0 24 24" focusable="false">
@@ -2091,31 +1936,20 @@ export default function App() {
                         : 'Next >'}
                     </button>
 
-                    <p className="form-note">
-                      Already joined?{' '}
-                      <button
-                        type="button"
+                    <div className="form-links-row">
+                      <span className="form-links-signin">Sign in</span>
+                      <a
                         className="form-terms-link"
-                        style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer' }}
-                        onClick={() => {
-                          setStatus('idle')
-                          setMessage('')
-                          setJoinStep('login')
-                        }}
+                        href="/terms"
+                        onClick={openTermsFromForm}
                       >
-                        Sign in
-                      </button>
-                    </p>
-                    <a
-                      className="form-terms-link"
-                      href="/terms"
-                      onClick={openTermsFromForm}
-                    >
-                      Terms &amp; Conditions
-                    </a>
+                        Terms &amp; Conditions
+                      </a>
+                    </div>
                   </form>
                 </>
               )}
+
             </div>
           </div>
         </div>
