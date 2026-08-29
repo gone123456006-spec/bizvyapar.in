@@ -269,39 +269,36 @@ export async function registerUser({ name, email, phone }) {
     phone,
   })
 
-  const existing = await findUserByEmail(cleanEmail)
-  if (existing) {
-    return loginWithEmailPhone({ email: cleanEmail, phone: cleanPhone })
-  }
-
   const userId = newUserId()
   const now = new Date()
   try {
-    await col('users').insertOne({
-      _id: userId,
-      email: cleanEmail,
-      passwordHash: null,
-      name: cleanName,
-      phone: cleanPhone,
-      emailVerified: false,
-      provider: 'local',
-      status: 'active',
-      failedLoginAttempts: 0,
-      lockedUntil: null,
-      lastLoginAt: null,
-      createdAt: now,
-      updatedAt: now,
-    })
-    await col('subscriptions').insertOne({
-      _id: randomUUID(),
-      userId,
-      plan: null,
-      status: 'none',
-      expiresAt: null,
-      activatedAt: null,
-      createdAt: now,
-      updatedAt: now,
-    })
+    await Promise.all([
+      col('users').insertOne({
+        _id: userId,
+        email: cleanEmail,
+        passwordHash: null,
+        name: cleanName,
+        phone: cleanPhone,
+        emailVerified: false,
+        provider: 'local',
+        status: 'active',
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        lastLoginAt: null,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      col('subscriptions').insertOne({
+        _id: randomUUID(),
+        userId,
+        plan: null,
+        status: 'none',
+        expiresAt: null,
+        activatedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      }),
+    ])
   } catch (error) {
     if (error?.code === 11000) {
       return loginWithEmailPhone({ email: cleanEmail, phone: cleanPhone })
@@ -321,7 +318,8 @@ export async function registerUser({ name, email, phone }) {
     updatedAt: now,
     lastLoginAt: null,
   })
-  const tenantId = await ensureTenantForUser(user)
+  const tenantId = `uid_${user.id}`
+  void ensureTenantForUser(user).catch(() => undefined)
 
   return {
     user,

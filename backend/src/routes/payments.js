@@ -11,6 +11,7 @@ import {
 import {
   getEmailConfigStatus,
   isEmailConfigured,
+  resolveWebinarLink,
   sendWebinarPaymentEmail,
 } from '../email.js'
 import { buildSubscription, isLifetimeActive } from '../subscription.js'
@@ -87,10 +88,11 @@ async function finalizePaidSeat({
   paymentId,
   sendEmail = true,
 }) {
-  const [webinarLink, amountPaise] = await Promise.all([
+  const [rawLink, amountPaise] = await Promise.all([
     getWebinarLink(),
     getWorkshopAmountPaise(),
   ])
+  const webinarLink = resolveWebinarLink(rawLink)
   const amountLabel = formatAmountLabel(amountPaise)
 
   // Always bind to authenticated userId tenant (no guest split DB).
@@ -295,17 +297,40 @@ paymentsRouter.post('/verify', requireAuth, async (req, res, next) => {
       return res.status(400).json({ message: 'Payment verification failed.' })
     }
 
-    // Idempotent short-circuit before rewrite/email.
+    // Idempotent short-circuit before rewrite — still (re)send Gmail so the
+    // user gets the webinar link even if webhook recorded the payment first.
     const existing = await findPaymentAnywhere(paymentId)
     if (existing) {
-      const liveLink = (await getWebinarLink()) || existing.webinarLink || null
+      const liveLink =
+        resolveWebinarLink(
+          (await getWebinarLink()) || existing.webinarLink || null,
+        )
+      const amountLabel = formatAmountLabel(await getWorkshopAmountPaise())
+      let emailSent = false
+      let emailError = null
+      if (isEmailConfigured()) {
+        try {
+          await sendWebinarPaymentEmail({
+            to: lead.email,
+            name: lead.name,
+            paymentId,
+            webinarLink: liveLink,
+            amountLabel,
+          })
+          emailSent = true
+        } catch (error) {
+          emailError = error.message || 'Could not send confirmation email.'
+          console.error('[payments] resend on alreadyRecorded failed:', error)
+        }
+      }
       return res.status(200).json({
-        message:
-          'Your payment is already confirmed. Now you are in for the Webinar.',
+        message: emailSent
+          ? 'Your payment is already confirmed. Check your Gmail for the join link.'
+          : 'Your payment is already confirmed. Now you are in for the Webinar.',
         paymentId,
         webinarLink: liveLink,
-        emailSent: false,
-        emailError: null,
+        emailSent,
+        emailError,
         alreadyRecorded: true,
         tenantId: existing.tenantId || null,
       })

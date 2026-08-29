@@ -203,7 +203,12 @@ export async function getAppSettings({ force = false } = {}) {
 
 export async function getWebinarLink() {
   const settings = await getAppSettings()
-  return settings.webinarLink
+  const link = String(settings.webinarLink || '').trim()
+  // Never expose the placeholder Meet URL to clients or emails
+  if (!link || /your-webinar-link|example\.com|localhost/i.test(link)) {
+    return 'https://www.bizvyapar.in'
+  }
+  return link
 }
 
 export async function getWorkshopAmountPaise() {
@@ -294,8 +299,13 @@ export async function updateAppSettings(input = {}) {
 }
 
 export function toPublicSettings(settings) {
+  const raw = String(settings.webinarLink || '').trim()
+  const webinarLink =
+    !raw || /your-webinar-link|example\.com|localhost/i.test(raw)
+      ? 'https://www.bizvyapar.in'
+      : raw
   return {
-    webinarLink: settings.webinarLink || null,
+    webinarLink,
     amountPaise: settings.workshopAmountPaise,
     amountLabel: formatAmountLabel(settings.workshopAmountPaise),
     updatedAt: settings.updatedAt,

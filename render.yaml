@@ -28,14 +28,6 @@ services:
         value: 0.0.0.0
       - key: WORKSHOP_AMOUNT_PAISE
         value: "100"
-      - key: SMTP_HOST
-        value: smtp.gmail.com
-      - key: SMTP_PORT
-        value: "587"
-      - key: SMTP_SECURE
-        value: "false"
-      - key: SMTP_SENDER_NAME
-        value: BizVyapar
       - key: REMINDERS_ENABLED
         value: "true"
       - key: PGSSL

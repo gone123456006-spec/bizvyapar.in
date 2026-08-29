@@ -102,8 +102,17 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;')
 }
 
+/** Prefer a real join link; never send the placeholder Meet URL. */
+export function resolveWebinarLink(link) {
+  const value = String(link || process.env.WEBINAR_LINK || '').trim()
+  if (!value || /your-webinar-link|example\.com|localhost/i.test(value)) {
+    return 'https://www.bizvyapar.in'
+  }
+  return value
+}
+
 function buildEmailContent({ name, paymentId, webinarLink, amountLabel }) {
-  const link = webinarLink || process.env.WEBINAR_LINK || ''
+  const link = resolveWebinarLink(webinarLink)
   const safeName = name || 'there'
   const workshop = getNextWorkshopSunday()
   const dateLabel = formatWorkshopDate(workshop)
@@ -210,7 +219,7 @@ function buildEmailContent({ name, paymentId, webinarLink, amountLabel }) {
 
 function buildReminderContent({ name, kind, webinarLink, workshopAt }) {
   const safeName = name || 'there'
-  const link = webinarLink || process.env.WEBINAR_LINK || ''
+  const link = resolveWebinarLink(webinarLink)
   const dateLabel = workshopAt.toLocaleDateString('en-IN', {
     weekday: 'long',
     day: 'numeric',
@@ -274,6 +283,34 @@ function buildReminderContent({ name, kind, webinarLink, workshopAt }) {
   }
 }
 
+let cachedTransporter = null
+let cachedTransporterKey = ''
+
+function getTransporter(config) {
+  const key = `${config.host}|${config.port}|${config.user}|${config.secure}`
+  if (cachedTransporter && cachedTransporterKey === key) {
+    return cachedTransporter
+  }
+  cachedTransporter = nodemailer.createTransport({
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+    requireTLS: !config.secure && config.port === 587,
+    auth: {
+      user: config.user,
+      pass: config.pass,
+    },
+    pool: true,
+    maxConnections: 3,
+    maxMessages: 50,
+    connectionTimeout: 12_000,
+    greetingTimeout: 12_000,
+    socketTimeout: 20_000,
+  })
+  cachedTransporterKey = key
+  return cachedTransporter
+}
+
 async function sendMail({ to, name, subject, text, html }) {
   const recipient = String(to || '').trim().toLowerCase()
   if (!recipient) {
@@ -292,42 +329,45 @@ async function sendMail({ to, name, subject, text, html }) {
   }
 
   const safeName = name || 'there'
-  const transporter = nodemailer.createTransport({
-    host: config.host,
-    port: config.port,
-    secure: config.secure,
-    requireTLS: !config.secure && config.port === 587,
-    auth: {
-      user: config.user,
-      pass: config.pass,
-    },
-    connectionTimeout: 15_000,
-    greetingTimeout: 15_000,
-    socketTimeout: 20_000,
-  })
+  const transporter = getTransporter(config)
 
-  // Fail fast if SMTP auth is wrong (Render misconfig)
-  await transporter.verify().catch((error) => {
-    console.error('[email] SMTP verify failed:', error.message)
-    throw error
-  })
+  try {
+    const info = await transporter.sendMail({
+      from: `"${config.senderName}" <${config.from}>`,
+      to: `"${safeName}" <${recipient}>`,
+      subject,
+      text,
+      html,
+    })
 
-  const info = await transporter.sendMail({
-    from: `"${config.senderName}" <${config.from}>`,
-    to: `"${safeName}" <${recipient}>`,
-    subject,
-    text,
-    html,
-  })
+    console.log(`[email] sent via ${config.provider}-smtp`, {
+      to: recipient,
+      subject,
+      host: config.host,
+      messageId: info.messageId || null,
+    })
 
-  console.log(`[email] sent via ${config.provider}-smtp`, {
-    to: recipient,
-    subject,
-    host: config.host,
-    messageId: info.messageId || null,
-  })
-
-  return { mode: `${config.provider}-smtp`, messageId: info.messageId || null }
+    return { mode: `${config.provider}-smtp`, messageId: info.messageId || null }
+  } catch (error) {
+    // Reset pool and retry once (common on Render cold start / Brevo blip)
+    cachedTransporter = null
+    cachedTransporterKey = ''
+    const retry = getTransporter(config)
+    const info = await retry.sendMail({
+      from: `"${config.senderName}" <${config.from}>`,
+      to: `"${safeName}" <${recipient}>`,
+      subject,
+      text,
+      html,
+    })
+    console.log(`[email] sent via ${config.provider}-smtp (retry)`, {
+      to: recipient,
+      subject,
+      messageId: info.messageId || null,
+      firstError: error.message,
+    })
+    return { mode: `${config.provider}-smtp`, messageId: info.messageId || null }
+  }
 }
 
 export async function sendWebinarPaymentEmail({

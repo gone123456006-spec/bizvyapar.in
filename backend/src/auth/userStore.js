@@ -347,49 +347,41 @@ export async function registerUser({ name, email, phone }) {
     phone,
   })
 
-  const existing = await findUserByEmail(cleanEmail)
-  if (existing) {
-    // Treat as Sign In so the client can continue without a hard stop
-    return loginWithEmailPhone({ email: cleanEmail, phone: cleanPhone })
-  }
-
   const userId = newUserId()
   const subId = randomUUID()
   const db = getPool()
-  const client = await db.connect()
   let row
   try {
-    await client.query('BEGIN')
-    const inserted = await client.query(
-      `INSERT INTO users (
-         id, email, password_hash, name, phone, email_verified, provider, status
-       ) VALUES ($1, $2, '', $3, $4, FALSE, 'local', 'active')
-       RETURNING *`,
-      [userId, cleanEmail, cleanName, cleanPhone],
+    // Fast path: one round-trip insert (no pre-read, no explicit BEGIN)
+    const inserted = await db.query(
+      `WITH new_user AS (
+         INSERT INTO users (
+           id, email, password_hash, name, phone, email_verified, provider, status
+         ) VALUES ($1, $2, '', $3, $4, FALSE, 'local', 'active')
+         RETURNING *
+       ),
+       new_sub AS (
+         INSERT INTO subscriptions (id, user_id, plan, status, expires_at, activated_at)
+         SELECT $5, id, NULL, 'none', NULL, NULL FROM new_user
+       )
+       SELECT * FROM new_user`,
+      [userId, cleanEmail, cleanName, cleanPhone, subId],
     )
     row = inserted.rows[0]
     if (!row) {
       throw new Error('Could not create account. Please try again.')
     }
-    await client.query(
-      `INSERT INTO subscriptions (id, user_id, plan, status, expires_at, activated_at)
-       VALUES ($1, $2, NULL, 'none', NULL, NULL)`,
-      [subId, userId],
-    )
-    await client.query('COMMIT')
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => undefined)
     if (error?.code === '23505') {
-      // Race: created between check and insert — sign them in
       return loginWithEmailPhone({ email: cleanEmail, phone: cleanPhone })
     }
     throw error
-  } finally {
-    client.release()
   }
 
   const user = mapUser(row)
-  const tenantId = await ensureTenantForUser(user)
+  const tenantId = `uid_${user.id}`
+  // Do not block Sign Up on tenant warm-up / legacy migrate
+  void ensureTenantForUser(user).catch(() => undefined)
   void migrateLegacyLifetimeByEmail(cleanEmail, userId).catch(() => undefined)
 
   return {

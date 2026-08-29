@@ -948,7 +948,14 @@ export default function App() {
           void (async () => {
             try {
               const token = await getAccessToken()
-              if (!token) return
+              if (!token) {
+                setSubmitted((prev) => ({
+                  ...(prev || {}),
+                  emailError:
+                    'Could not confirm payment session. Use the join button below.',
+                }))
+                return
+              }
 
               const verifyRes = await fetch(apiUrl('/api/payments/verify'), {
                 method: 'POST',
@@ -973,7 +980,15 @@ export default function App() {
                 verifyData = {}
               }
 
-              if (!verifyRes.ok) return
+              if (!verifyRes.ok) {
+                setSubmitted((prev) => ({
+                  ...(prev || {}),
+                  emailError:
+                    verifyData.message ||
+                    'Payment confirmed, but email could not be verified yet.',
+                }))
+                return
+              }
 
               setSubmitted((prev) => ({
                 ...(prev || {}),
@@ -995,6 +1010,11 @@ export default function App() {
               void refreshSubscription()
             } catch (error) {
               console.warn('[payments] background verify failed', error)
+              setSubmitted((prev) => ({
+                ...(prev || {}),
+                emailError:
+                  'Could not reach the server to send Gmail. Use the join button below.',
+              }))
             }
           })()
         },
@@ -1785,14 +1805,20 @@ export default function App() {
                   {submitted.emailSent ? (
                     <p className="join-sub">
                       Webinar details are linked to{' '}
-                      <strong>{submitted.email}</strong>.
+                      <strong>{submitted.email}</strong>. Check Gmail (and Spam).
                     </p>
                   ) : submitted.emailError ? (
                     <p className="form-error" role="alert">
                       Email not sent to <strong>{submitted.email}</strong>
                       {submitted.emailError ? `: ${submitted.emailError}` : '.'}
+                      {' '}Use the button below to join.
                     </p>
-                  ) : null}
+                  ) : (
+                    <p className="join-sub">
+                      Sending confirmation to <strong>{submitted.email}</strong>
+                      …
+                    </p>
+                  )}
 
                   {(publicSettings.webinarLink || submitted.webinarLink) ? (
                     <a
