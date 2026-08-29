@@ -63,11 +63,14 @@ authRouter.post('/register', authRateLimit(), async (req, res) => {
       password: req.body?.password,
       phone: req.body?.phone,
     })
-    const tokens = await issueTokenPair(user, {
-      userAgent: req.headers['user-agent'],
-      ip: clientIp(req),
-    })
-    const subscription = await getSubscriptionByUserId(user.id)
+
+    const [tokens, subscription] = await Promise.all([
+      issueTokenPair(user, {
+        userAgent: req.headers['user-agent'],
+        ip: clientIp(req),
+      }),
+      getSubscriptionByUserId(user.id),
+    ])
 
     const sessionId = String(req.body?.sessionId || '').trim() || undefined
     const visitorId = String(req.body?.visitorId || '').trim() || null
@@ -105,11 +108,13 @@ authRouter.post('/login', authRateLimit(), async (req, res) => {
       email: req.body?.email,
       password: req.body?.password,
     })
-    const tokens = await issueTokenPair(user, {
-      userAgent: req.headers['user-agent'],
-      ip: clientIp(req),
-    })
-    const subscription = await getSubscriptionByUserId(user.id)
+    const [tokens, subscription] = await Promise.all([
+      issueTokenPair(user, {
+        userAgent: req.headers['user-agent'],
+        ip: clientIp(req),
+      }),
+      getSubscriptionByUserId(user.id),
+    ])
 
     const sessionId = String(req.body?.sessionId || '').trim() || undefined
     const visitorId = String(req.body?.visitorId || '').trim() || null

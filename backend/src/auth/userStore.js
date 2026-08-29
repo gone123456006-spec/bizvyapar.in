@@ -125,41 +125,37 @@ export async function ensureTenantForUser(user) {
   const tenantId = `uid_${userId}`
   const email = normalizeEmail(user.email)
   const now = new Date().toISOString()
+  const name = sanitizeName(user.name) || null
+  const phone = normalizePhone(user.phone)
 
-  await db.query(
-    `INSERT INTO tenants (tenant_id, email, uid, created_at, updated_at)
-     VALUES ($1, $2, $3, $4::timestamptz, $4::timestamptz)
-     ON CONFLICT (tenant_id) DO UPDATE
-       SET email = COALESCE(EXCLUDED.email, tenants.email),
-           uid = COALESCE(tenants.uid, EXCLUDED.uid),
-           updated_at = EXCLUDED.updated_at`,
-    [tenantId, email, userId, now],
-  )
-
-  await db.query(
-    `INSERT INTO profiles (
-       tenant_id, email, uid, name, phone, provider, email_verified,
-       status, created_at, updated_at
-     ) VALUES (
-       $1, $2, $3, $4, $5, 'local', TRUE, 'active', $6::timestamptz, $6::timestamptz
-     )
-     ON CONFLICT (tenant_id) DO UPDATE SET
-       email = COALESCE(EXCLUDED.email, profiles.email),
-       uid = COALESCE(profiles.uid, EXCLUDED.uid),
-       name = COALESCE(EXCLUDED.name, profiles.name),
-       phone = COALESCE(EXCLUDED.phone, profiles.phone),
-       provider = 'local',
-       email_verified = TRUE,
-       updated_at = EXCLUDED.updated_at`,
-    [
-      tenantId,
-      email,
-      userId,
-      sanitizeName(user.name) || null,
-      normalizePhone(user.phone),
-      now,
-    ],
-  )
+  await Promise.all([
+    db.query(
+      `INSERT INTO tenants (tenant_id, email, uid, created_at, updated_at)
+       VALUES ($1, $2, $3, $4::timestamptz, $4::timestamptz)
+       ON CONFLICT (tenant_id) DO UPDATE
+         SET email = COALESCE(EXCLUDED.email, tenants.email),
+             uid = COALESCE(tenants.uid, EXCLUDED.uid),
+             updated_at = EXCLUDED.updated_at`,
+      [tenantId, email, userId, now],
+    ),
+    db.query(
+      `INSERT INTO profiles (
+         tenant_id, email, uid, name, phone, provider, email_verified,
+         status, created_at, updated_at
+       ) VALUES (
+         $1, $2, $3, $4, $5, 'local', TRUE, 'active', $6::timestamptz, $6::timestamptz
+       )
+       ON CONFLICT (tenant_id) DO UPDATE SET
+         email = COALESCE(EXCLUDED.email, profiles.email),
+         uid = COALESCE(profiles.uid, EXCLUDED.uid),
+         name = COALESCE(EXCLUDED.name, profiles.name),
+         phone = COALESCE(EXCLUDED.phone, profiles.phone),
+         provider = 'local',
+         email_verified = TRUE,
+         updated_at = EXCLUDED.updated_at`,
+      [tenantId, email, userId, name, phone, now],
+    ),
+  ])
 
   return tenantId
 }
@@ -181,29 +177,27 @@ export async function registerUser({ name, email, password, phone }) {
     throw error
   }
 
-  const existing = await findUserByEmail(cleanEmail)
-  if (existing) {
-    const error = new Error('Could not create account. Please try signing in.')
-    error.status = 409
-    throw error
-  }
-
   const userId = newUserId()
+  const subId = randomUUID()
+  // Hash is the slow step — start it before opening a DB transaction
   const passwordHash = await hashPassword(password)
   const db = getPool()
   const client = await db.connect()
+  let row
   try {
     await client.query('BEGIN')
-    await client.query(
+    const inserted = await client.query(
       `INSERT INTO users (
          id, email, password_hash, name, phone, email_verified, provider, status
-       ) VALUES ($1, $2, $3, $4, $5, FALSE, 'local', 'active')`,
+       ) VALUES ($1, $2, $3, $4, $5, FALSE, 'local', 'active')
+       RETURNING *`,
       [userId, cleanEmail, passwordHash, cleanName, cleanPhone],
     )
+    row = inserted.rows[0]
     await client.query(
       `INSERT INTO subscriptions (id, user_id, plan, status, expires_at, activated_at)
        VALUES ($1, $2, NULL, 'none', NULL, NULL)`,
-      [randomUUID(), userId],
+      [subId, userId],
     )
     await client.query('COMMIT')
   } catch (error) {
@@ -218,10 +212,12 @@ export async function registerUser({ name, email, password, phone }) {
     client.release()
   }
 
-  const row = await findUserById(userId)
-  const tenantId = await ensureTenantForUser(row)
-  await migrateLegacyLifetimeByEmail(cleanEmail, userId)
-  return { user: mapUser(row), tenantId }
+  const user = mapUser(row)
+  const [tenantId] = await Promise.all([
+    ensureTenantForUser(user),
+    migrateLegacyLifetimeByEmail(cleanEmail, userId),
+  ])
+  return { user, tenantId }
 }
 
 /**
@@ -233,7 +229,7 @@ async function migrateLegacyLifetimeByEmail(email, userId) {
   const res = await db.query(
     `SELECT tenant_id, uid, subscription_status, status
      FROM profiles
-     WHERE LOWER(email) = LOWER($1)
+     WHERE email = $1
        AND (
          subscription_status = 'active'
          OR status = 'paid'
