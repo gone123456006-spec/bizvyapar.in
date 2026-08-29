@@ -1,0 +1,121 @@
+/**
+ * MongoDB Atlas connection for BizVyapar durable data.
+ * Set MONGODB_URI in env (never commit the real URI).
+ */
+import { MongoClient } from 'mongodb'
+
+let client = null
+let db = null
+let connecting = null
+
+export function getMongoUri() {
+  return String(
+    process.env.MONGODB_URI || process.env.MONGO_URI || '',
+  ).trim()
+}
+
+export function isMongoEnabled() {
+  return Boolean(getMongoUri())
+}
+
+export function getMongoDbName() {
+  const fromEnv = String(process.env.MONGODB_DB || '').trim()
+  if (fromEnv) return fromEnv
+  try {
+    const uri = getMongoUri()
+    if (!uri) return 'bizvyapar'
+    const path = new URL(uri).pathname.replace(/^\//, '')
+    return path && path !== '' ? path.split('/')[0] : 'bizvyapar'
+  } catch {
+    return 'bizvyapar'
+  }
+}
+
+export async function initMongo() {
+  if (!isMongoEnabled()) return { enabled: false }
+  if (db) return { enabled: true, db }
+
+  if (!connecting) {
+    connecting = (async () => {
+      const uri = getMongoUri()
+      client = new MongoClient(uri, {
+        maxPoolSize: Number(process.env.MONGO_POOL_MAX || 10),
+        serverSelectionTimeoutMS: 12_000,
+      })
+      await client.connect()
+      db = client.db(getMongoDbName())
+      await ensureMongoIndexes(db)
+      console.log(`[db] MongoDB connected (${getMongoDbName()})`)
+      return db
+    })()
+  }
+
+  await connecting
+  return { enabled: true, db }
+}
+
+export function getDb() {
+  if (!db) {
+    const error = new Error('MongoDB is not initialized. Set MONGODB_URI.')
+    error.status = 503
+    throw error
+  }
+  return db
+}
+
+export function col(name) {
+  return getDb().collection(name)
+}
+
+async function ensureMongoIndexes(database) {
+  await Promise.all([
+    database.collection('users').createIndexes([
+      { key: { email: 1 }, unique: true, name: 'users_email_unique' },
+      { key: { phone: 1 }, name: 'users_phone' },
+    ]),
+    database.collection('refresh_tokens').createIndexes([
+      { key: { tokenHash: 1 }, unique: true, name: 'refresh_token_hash_unique' },
+      { key: { userId: 1 }, name: 'refresh_tokens_user' },
+      { key: { expiresAt: 1 }, name: 'refresh_tokens_expires' },
+    ]),
+    database.collection('subscriptions').createIndexes([
+      { key: { userId: 1 }, unique: true, name: 'subscriptions_user_unique' },
+      { key: { status: 1 }, name: 'subscriptions_status' },
+    ]),
+    database.collection('profiles').createIndexes([
+      { key: { tenantId: 1 }, unique: true, name: 'profiles_tenant_unique' },
+      { key: { email: 1 }, name: 'profiles_email' },
+      { key: { uid: 1 }, name: 'profiles_uid' },
+    ]),
+    database.collection('payments').createIndexes([
+      { key: { paymentId: 1 }, unique: true, name: 'payments_payment_id_unique' },
+      { key: { tenantId: 1 }, name: 'payments_tenant' },
+      { key: { userId: 1 }, name: 'payments_user' },
+      { key: { email: 1 }, name: 'payments_email' },
+    ]),
+    database.collection('registrations').createIndexes([
+      { key: { tenantId: 1, email: 1 }, unique: true, name: 'registrations_tenant_email' },
+      { key: { email: 1 }, name: 'registrations_email' },
+    ]),
+    database.collection('settings').createIndexes([
+      { key: { key: 1 }, unique: true, name: 'settings_key_unique' },
+    ]),
+    database.collection('activity').createIndexes([
+      { key: { tenantId: 1, at: -1 }, name: 'activity_tenant_at' },
+    ]),
+    database.collection('analytics_sessions').createIndexes([
+      { key: { sessionId: 1 }, name: 'analytics_session_id' },
+      { key: { tenantId: 1 }, name: 'analytics_tenant' },
+      { key: { visitorId: 1 }, name: 'analytics_visitor' },
+    ]),
+  ])
+}
+
+export async function closeMongo() {
+  connecting = null
+  db = null
+  if (client) {
+    await client.close().catch(() => undefined)
+    client = null
+  }
+}

@@ -1,9 +1,12 @@
 /**
- * Users + subscriptions + refresh tokens (Postgres).
+ * Users + subscriptions + refresh tokens.
+ * Prefers MongoDB Atlas when MONGODB_URI is set; otherwise Postgres.
  * userId (UUID) is the permanent identity — never derived from name/email/phone.
  */
 import { randomUUID } from 'node:crypto'
 import { getPool, isPostgresEnabled } from '../db/postgres.js'
+import { isMongoEnabled } from '../db/mongo.js'
+import * as mongoAuth from './mongoUserStore.js'
 import {
   createRefreshTokenRaw,
   hashToken,
@@ -11,6 +14,10 @@ import {
   refreshExpiryDate,
   signAccessToken,
 } from './tokens.js'
+
+function preferMongo() {
+  return isMongoEnabled()
+}
 
 function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase()
@@ -70,19 +77,20 @@ function validateIdentity({ name, email, phone }) {
 
 function mapUser(row) {
   if (!row) return null
+  const id = String(row.id || row._id || '')
   return {
-    id: row.id,
-    userId: row.id,
-    uid: row.id,
+    id,
+    userId: id,
+    uid: id,
     email: row.email,
     name: row.name,
     phone: row.phone,
-    emailVerified: Boolean(row.email_verified),
+    emailVerified: Boolean(row.email_verified ?? row.emailVerified),
     provider: row.provider || 'local',
     status: row.status || 'active',
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    lastLoginAt: row.last_login_at,
+    createdAt: row.created_at || row.createdAt,
+    updatedAt: row.updated_at || row.updatedAt,
+    lastLoginAt: row.last_login_at || row.lastLoginAt,
   }
 }
 
@@ -107,9 +115,10 @@ function mapSubscription(row) {
 }
 
 export function assertPostgres() {
+  if (preferMongo()) return
   if (!isPostgresEnabled()) {
     const error = new Error(
-      'Auth requires DATABASE_URL (Postgres) for permanent accounts.',
+      'Auth requires MONGODB_URI or DATABASE_URL for permanent accounts.',
     )
     error.status = 503
     throw error
@@ -117,6 +126,7 @@ export function assertPostgres() {
 }
 
 export async function findUserByEmail(email) {
+  if (preferMongo()) return mongoAuth.findUserByEmail(email)
   assertPostgres()
   const db = getPool()
   const res = await db.query(`SELECT * FROM users WHERE email = $1 LIMIT 1`, [
@@ -126,6 +136,7 @@ export async function findUserByEmail(email) {
 }
 
 export async function findUserById(userId) {
+  if (preferMongo()) return mongoAuth.findUserById(userId)
   assertPostgres()
   const db = getPool()
   const res = await db.query(`SELECT * FROM users WHERE id = $1 LIMIT 1`, [
@@ -135,6 +146,7 @@ export async function findUserById(userId) {
 }
 
 export async function getSubscriptionByUserId(userId) {
+  if (preferMongo()) return mongoAuth.getSubscriptionByUserId(userId)
   assertPostgres()
   const db = getPool()
   const res = await db.query(
@@ -145,6 +157,7 @@ export async function getSubscriptionByUserId(userId) {
 }
 
 export async function isLifetimeActiveForUser(userId) {
+  if (preferMongo()) return mongoAuth.isLifetimeActiveForUser(userId)
   const sub = await getSubscriptionByUserId(userId)
   return sub.status === 'active' && sub.plan === 'lifetime'
 }
@@ -155,6 +168,7 @@ export async function isLifetimeActiveForUser(userId) {
  * Never fails auth — recovers from email/uid unique conflicts.
  */
 export async function ensureTenantForUser(user) {
+  if (preferMongo()) return mongoAuth.ensureTenantForUser(user)
   assertPostgres()
   const db = getPool()
   const userId = String(user.id || user.userId || '').trim()
@@ -262,6 +276,7 @@ async function upsertProfileForTenant(db, tenantId, { email, userId, name, phone
  * Optimized: one joined SELECT; login bookkeeping is non-blocking.
  */
 export async function loginWithEmailPhone({ email, phone }) {
+  if (preferMongo()) return mongoAuth.loginWithEmailPhone({ email, phone })
   assertPostgres()
   const { cleanEmail, cleanPhone } = validateEmailPhone({ email, phone })
   const db = getPool()
@@ -324,6 +339,7 @@ export async function loginWithEmailPhone({ email, phone }) {
  * Reliable transaction insert (user + subscription).
  */
 export async function registerUser({ name, email, phone }) {
+  if (preferMongo()) return mongoAuth.registerUser({ name, email, phone })
   assertPostgres()
   const { cleanName, cleanEmail, cleanPhone } = validateIdentity({
     name,
@@ -432,6 +448,7 @@ async function migrateLegacyLifetimeByEmail(email, userId) {
 }
 
 export async function issueTokenPair(user, meta = {}) {
+  if (preferMongo()) return mongoAuth.issueTokenPair(user, meta)
   const refreshRaw = createRefreshTokenRaw()
   const tokenHash = hashToken(refreshRaw)
   const expiresAt = refreshExpiryDate()
@@ -470,6 +487,7 @@ function ACCESS_TTL_SECONDS() {
 }
 
 export async function rotateRefreshToken(refreshToken, meta = {}) {
+  if (preferMongo()) return mongoAuth.rotateRefreshToken(refreshToken, meta)
   assertPostgres()
   const tokenHash = hashToken(refreshToken)
   const db = getPool()
@@ -547,6 +565,7 @@ export async function rotateRefreshToken(refreshToken, meta = {}) {
 }
 
 export async function revokeRefreshToken(refreshToken) {
+  if (preferMongo()) return mongoAuth.revokeRefreshToken(refreshToken)
   if (!refreshToken) return
   assertPostgres()
   const db = getPool()
@@ -559,6 +578,7 @@ export async function revokeRefreshToken(refreshToken) {
 }
 
 export async function revokeAllRefreshTokensForUser(userId) {
+  if (preferMongo()) return mongoAuth.revokeAllRefreshTokensForUser(userId)
   assertPostgres()
   const db = getPool()
   await db.query(
@@ -570,6 +590,7 @@ export async function revokeAllRefreshTokensForUser(userId) {
 }
 
 export async function activateLifetimeSubscription(userId) {
+  if (preferMongo()) return mongoAuth.activateLifetimeSubscription(userId)
   assertPostgres()
   const db = getPool()
   const now = new Date().toISOString()
@@ -602,6 +623,7 @@ export async function activateLifetimeSubscription(userId) {
 }
 
 export async function updateUserProfile(userId, { name, phone }) {
+  if (preferMongo()) return mongoAuth.updateUserProfile(userId, { name, phone })
   assertPostgres()
   const db = getPool()
   const cleanName = name != null ? sanitizeName(name) : null

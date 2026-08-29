@@ -3,6 +3,7 @@ import cors from 'cors'
 import express from 'express'
 import { getAllowedOrigins, getRuntimeStatus } from './config.js'
 import { isPostgresEnabled } from './db/postgres.js'
+import { isMongoEnabled } from './db/mongo.js'
 import { healthRouter } from './routes/health.js'
 import { apiRouter } from './routes/api.js'
 
@@ -69,7 +70,11 @@ export function createApp() {
       message: 'BizVyapar API is running.',
       health: '/health',
       ready: runtime.ready,
-      database: isPostgresEnabled() ? 'postgres' : 'file-tenants',
+      database: isMongoEnabled()
+        ? 'mongodb'
+        : isPostgresEnabled()
+          ? 'postgres'
+          : 'file-tenants',
       isolation: 'per-user-tenant',
     })
   })

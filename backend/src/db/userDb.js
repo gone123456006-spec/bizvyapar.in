@@ -8,8 +8,18 @@ import {
 } from './paths.js'
 import { resolveTenant, listTenantIds } from './registry.js'
 import { isPostgresEnabled } from './postgres.js'
+import { isMongoEnabled } from './mongo.js'
 import * as pg from './pgStore.js'
+import * as mongo from './mongoStore.js'
 import { applyLifetimeEntitlement, shouldGrantLifetimeFromEnv } from '../subscription.js'
+
+function useMongo() {
+  return isMongoEnabled()
+}
+
+function usePostgres() {
+  return isPostgresEnabled() && !useMongo()
+}
 
 function emptyDatabase(tenantId) {
   const now = new Date().toISOString()
@@ -107,7 +117,8 @@ function pushActivity(db, type, details = {}) {
 }
 
 export async function touchLogin(identity) {
-  if (isPostgresEnabled()) return pg.pgTouchLogin(identity)
+  if (useMongo()) return mongo.mongoTouchLogin(identity)
+  if (usePostgres()) return pg.pgTouchLogin(identity)
 
   const { tenantId } = await resolveTenant(identity)
   return withTenantLock(tenantId, async () => {
@@ -146,7 +157,8 @@ export async function touchLogin(identity) {
 }
 
 export async function getOwnProfile(tenantId) {
-  if (isPostgresEnabled()) return pg.pgGetOwnProfile(tenantId)
+  if (useMongo()) return mongo.mongoGetOwnProfile(tenantId)
+  if (usePostgres()) return pg.pgGetOwnProfile(tenantId)
 
   return withTenantLock(tenantId, async () => {
     const db = await readTenantDb(tenantId)
@@ -162,12 +174,14 @@ export async function getOwnProfile(tenantId) {
 }
 
 export async function getOwnDatabaseSnapshot(tenantId) {
-  if (isPostgresEnabled()) return pg.pgGetOwnDatabaseSnapshot(tenantId)
+  if (useMongo()) return mongo.mongoGetOwnDatabaseSnapshot(tenantId)
+  if (usePostgres()) return pg.pgGetOwnDatabaseSnapshot(tenantId)
   return withTenantLock(tenantId, async () => readTenantDb(tenantId))
 }
 
 export async function upsertRegistration(identity, registration) {
-  if (isPostgresEnabled()) return pg.pgUpsertRegistration(identity, registration)
+  if (useMongo()) return mongo.mongoUpsertRegistration(identity, registration)
+  if (usePostgres()) return pg.pgUpsertRegistration(identity, registration)
 
   const { tenantId } = await resolveTenant(identity)
   return withTenantLock(tenantId, async () => {
@@ -226,7 +240,8 @@ export async function upsertRegistration(identity, registration) {
 }
 
 export async function recordPayment(identity, payment) {
-  if (isPostgresEnabled()) return pg.pgRecordPayment(identity, payment)
+  if (useMongo()) return mongo.mongoRecordPayment(identity, payment)
+  if (usePostgres()) return pg.pgRecordPayment(identity, payment)
 
   const { tenantId } = await resolveTenant(identity)
   return withTenantLock(tenantId, async () => {
@@ -333,7 +348,8 @@ export async function recordPayment(identity, payment) {
 }
 
 export async function findPaymentAnywhere(paymentId) {
-  if (isPostgresEnabled()) return pg.pgFindPaymentById(paymentId)
+  if (useMongo()) return mongo.mongoFindPaymentById(paymentId)
+  if (usePostgres()) return pg.pgFindPaymentById(paymentId)
 
   const ids = await listTenantIds()
   for (const tenantId of ids) {
@@ -345,7 +361,8 @@ export async function findPaymentAnywhere(paymentId) {
 }
 
 export async function listPaidRecipients() {
-  if (isPostgresEnabled()) return pg.pgListPaidRecipients()
+  if (useMongo()) return mongo.mongoListPaidRecipients()
+  if (usePostgres()) return pg.pgListPaidRecipients()
 
   const ids = await listTenantIds()
   const recipients = []
@@ -409,13 +426,15 @@ export function publicTenantFingerprint(tenantId) {
 }
 
 export async function findTenantIdByEmail(email) {
-  if (isPostgresEnabled()) return pg.pgFindTenantIdByEmail(email)
+  if (useMongo()) return mongo.mongoFindTenantIdByEmail(email)
+  if (usePostgres()) return pg.pgFindTenantIdByEmail(email)
   const { findTenantIdByEmail: fileFind } = await import('./registry.js')
   return fileFind(email)
 }
 
 export async function findTenantIdByUid(uid) {
-  if (isPostgresEnabled()) return pg.pgFindTenantIdByUid(uid)
+  if (useMongo()) return mongo.mongoFindTenantIdByUid(uid)
+  if (usePostgres()) return pg.pgFindTenantIdByUid(uid)
   const { findTenantIdByUid: fileFind } = await import('./registry.js')
   return fileFind(uid)
 }

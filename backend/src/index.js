@@ -5,6 +5,7 @@ import { getHost, getPort, getRuntimeStatus } from './config.js'
 import { migrateLegacySharedData } from './db/migrate.js'
 import { ensureDataLayout } from './db/paths.js'
 import { closePostgres, initPostgres, isPostgresEnabled } from './db/postgres.js'
+import { closeMongo, initMongo, isMongoEnabled } from './db/mongo.js'
 import { ensureAnalyticsSchema } from './db/analyticsSchema.js'
 import { startReminderScheduler } from './db/reminders.js'
 
@@ -17,30 +18,31 @@ const allowFileTenants =
 
 await ensureDataLayout()
 
-if (!isPostgresEnabled() && (isRender || isProduction) && !allowFileTenants) {
+const hasDurableDb = isMongoEnabled() || isPostgresEnabled()
+
+if (!hasDurableDb && (isRender || isProduction) && !allowFileTenants) {
   console.error(
-    '[db] FATAL: DATABASE_URL is required on Render/production for permanent subscriptions.',
+    '[db] FATAL: MONGODB_URI (preferred) or DATABASE_URL is required on Render/production.',
   )
   console.error(
-    '[db] File storage is wiped when the free service restarts — that is why subscriptions disappear after a few hours.',
+    '[db] File storage is wiped when the free service restarts — subscriptions would disappear.',
   )
   console.error(
-    '[db] Fix: Render → your API service → Environment → add DATABASE_URL from a Postgres database.',
-  )
-  console.error(
-    '[db] Temporary escape hatch (not durable): ALLOW_FILE_TENANTS=true',
+    '[db] Fix: add MONGODB_URI from MongoDB Atlas (or DATABASE_URL from Postgres).',
   )
   process.exit(1)
 }
 
-if (isPostgresEnabled()) {
+if (isMongoEnabled()) {
+  await initMongo()
+} else if (isPostgresEnabled()) {
   await initPostgres()
   await ensureAnalyticsSchema().catch((error) => {
     console.error('[db] analytics schema failed', error.message)
   })
 } else {
   console.warn(
-    '[db] DATABASE_URL not set — using isolated file tenants (NOT durable on Render)',
+    '[db] No MONGODB_URI / DATABASE_URL — using isolated file tenants (NOT durable on Render)',
   )
   await migrateLegacySharedData().catch((error) => {
     console.error('[db] legacy migration failed', error)
@@ -51,11 +53,16 @@ const reminderTimer = startReminderScheduler()
 
 const server = app.listen(PORT, HOST, () => {
   const runtime = getRuntimeStatus()
+  const database = isMongoEnabled()
+    ? 'mongodb'
+    : isPostgresEnabled()
+      ? 'postgres'
+      : 'file-tenants'
   console.log(`BizVyapar API listening on http://${HOST}:${PORT}`)
   console.log('[email]', getEmailConfigStatus())
   console.log('[runtime]', {
     ready: runtime.ready,
-    database: isPostgresEnabled() ? 'postgres' : 'file-tenants',
+    database,
     razorpay: runtime.razorpay,
     email: runtime.email,
     firebase: runtime.firebase,
@@ -65,9 +72,9 @@ const server = app.listen(PORT, HOST, () => {
     isolation: 'per-user-tenant',
   })
 
-  if (!isPostgresEnabled()) {
+  if (!hasDurableDb) {
     console.warn(
-      '[runtime] WARNING: subscriptions will NOT survive restarts without DATABASE_URL',
+      '[runtime] WARNING: subscriptions will NOT survive restarts without MONGODB_URI or DATABASE_URL',
     )
   }
 
@@ -83,6 +90,7 @@ function shutdown(signal) {
   console.log(`[shutdown] ${signal} received, closing server...`)
   if (reminderTimer) clearInterval(reminderTimer)
   server.close(async () => {
+    await closeMongo().catch(() => undefined)
     await closePostgres().catch(() => undefined)
     process.exit(0)
   })

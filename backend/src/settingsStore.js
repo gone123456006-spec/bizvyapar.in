@@ -8,6 +8,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { getPool, isPostgresEnabled } from './db/postgres.js'
+import { col, isMongoEnabled } from './db/mongo.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SETTINGS_FILE = path.join(__dirname, '..', 'data', 'app-settings.json')
@@ -143,7 +144,34 @@ export async function getAppSettings({ force = false } = {}) {
   const defaults = envDefaults()
   let stored = null
 
-  if (isPostgresEnabled()) {
+  if (isMongoEnabled()) {
+    try {
+      const rows = await col('settings')
+        .find({ key: { $in: [KEYS.webinarLink, KEYS.workshopAmountPaise] } })
+        .toArray()
+      if (rows.length) {
+        const map = Object.fromEntries(rows.map((row) => [row.key, row]))
+        const defaults = envDefaults()
+        const webinarRow = map[KEYS.webinarLink]
+        const amountRow = map[KEYS.workshopAmountPaise]
+        const amount = Number(amountRow?.value)
+        stored = {
+          webinarLink:
+            String(webinarRow?.value || '').trim() || defaults.webinarLink,
+          workshopAmountPaise:
+            Number.isFinite(amount) && amount > 0
+              ? Math.round(amount)
+              : defaults.workshopAmountPaise,
+          updatedAt: webinarRow?.updatedAt || amountRow?.updatedAt || null,
+          source: 'mongodb',
+        }
+      }
+    } catch (error) {
+      console.error('[settings] mongodb read failed', error.message)
+    }
+  }
+
+  if (!stored && isPostgresEnabled()) {
     try {
       stored = await readPostgresSettings()
     } catch (error) {
@@ -226,7 +254,31 @@ export async function updateAppSettings(input = {}) {
     workshopAmountPaise: next.workshopAmountPaise,
   }
 
-  if (isPostgresEnabled()) {
+  if (isMongoEnabled()) {
+    const now = new Date()
+    await Promise.all([
+      col('settings').updateOne(
+        { key: KEYS.webinarLink },
+        {
+          $set: { value: String(patch.webinarLink || ''), updatedAt: now },
+          $setOnInsert: { key: KEYS.webinarLink },
+        },
+        { upsert: true },
+      ),
+      col('settings').updateOne(
+        { key: KEYS.workshopAmountPaise },
+        {
+          $set: {
+            value: String(patch.workshopAmountPaise),
+            updatedAt: now,
+          },
+          $setOnInsert: { key: KEYS.workshopAmountPaise },
+        },
+        { upsert: true },
+      ),
+    ])
+    next.source = 'mongodb'
+  } else if (isPostgresEnabled()) {
     await writePostgresSettings(patch)
     next.source = 'postgres'
   } else {

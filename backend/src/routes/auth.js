@@ -94,6 +94,11 @@ authRouter.get('/status', (_req, res) => {
     provider: 'name-email-phone',
     passwordRequired: false,
     passwordAuth: false,
+    database: process.env.MONGODB_URI
+      ? 'mongodb'
+      : process.env.DATABASE_URL
+        ? 'postgres'
+        : 'none',
     modes: {
       signUp: 'name + gmail + mobile (create account)',
       signIn: 'gmail + mobile (existing account)',
