@@ -37,8 +37,12 @@ export function getRuntimeStatus() {
     process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET,
   )
   const email = Boolean(
-    (process.env.SMTP_USER || process.env.GMAIL_USER) &&
-      (process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD),
+    (process.env.SMTP_USER || process.env.BREVO_SMTP_LOGIN || process.env.GMAIL_USER) &&
+      (process.env.SMTP_PASS ||
+        process.env.SMTP_PASSWORD ||
+        process.env.BREVO_SMTP_KEY ||
+        process.env.GMAIL_APP_PASSWORD) &&
+      (process.env.SMTP_FROM || process.env.SMTP_FROM_EMAIL || process.env.EMAIL_FROM),
   )
   const firebase = Boolean(process.env.FIREBASE_PROJECT_ID)
   const webinarLink = Boolean(String(process.env.WEBINAR_LINK || '').trim())

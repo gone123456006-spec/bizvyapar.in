@@ -12,6 +12,7 @@ function getSmtpConfig() {
   ).trim()
   const pass = String(
     process.env.SMTP_PASS ||
+      process.env.SMTP_PASSWORD ||
       process.env.BREVO_SMTP_KEY ||
       process.env.GMAIL_APP_PASSWORD ||
       '',
@@ -19,13 +20,20 @@ function getSmtpConfig() {
     .replace(/\s+/g, '')
     .trim()
   const from = String(
-    process.env.SMTP_FROM || process.env.EMAIL_FROM || '',
+    process.env.SMTP_FROM ||
+      process.env.SMTP_FROM_EMAIL ||
+      process.env.EMAIL_FROM ||
+      '',
   ).trim()
   const port = Number(process.env.SMTP_PORT || 587)
   const secure =
     String(process.env.SMTP_SECURE || (port === 465 ? 'true' : 'false'))
       .toLowerCase() === 'true'
-  const senderName = String(process.env.SMTP_SENDER_NAME || 'BizVyapar').trim()
+  const senderName = String(
+    process.env.SMTP_SENDER_NAME ||
+      process.env.SMTP_FROM_NAME ||
+      'BizVyapar',
+  ).trim()
 
   // From must be a Brevo-verified sender (often your Gmail). Login is separate.
   if (!user || !pass || !from) {
