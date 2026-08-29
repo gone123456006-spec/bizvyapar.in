@@ -76,6 +76,7 @@ authRouter.get('/status', (_req, res) => {
   res.json({
     configured: true,
     provider: 'name-email-phone',
+    passwordRequired: false,
     accessTokenTtl: process.env.ACCESS_TOKEN_TTL || '15m',
     isolation: 'per-user-database',
   })
