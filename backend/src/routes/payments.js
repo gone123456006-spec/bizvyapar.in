@@ -63,12 +63,12 @@ function validateLead(body) {
 function assertAuthEmail(auth, email) {
   const authEmail = String(auth?.email || '').trim().toLowerCase()
   if (!authEmail) {
-    const error = new Error('Google account email is required for payment.')
+    const error = new Error('Account email is required for payment.')
     error.status = 401
     throw error
   }
   if (authEmail !== email) {
-    const error = new Error('Payment email must match your signed-in Google account.')
+    const error = new Error('Payment email must match your signed-in account.')
     error.status = 403
     throw error
   }
@@ -87,7 +87,7 @@ async function finalizePaidSeat({
   ])
   const amountLabel = formatAmountLabel(amountPaise)
 
-  // Always bind to Firebase uid tenant (no guest split DB).
+  // Always bind to authenticated uid tenant (no guest split DB).
   await touchLogin({
     uid: auth.uid,
     email: auth.email,

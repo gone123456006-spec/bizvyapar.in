@@ -4,184 +4,197 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from 'react'
-import {
-  GoogleAuthProvider,
-  onAuthStateChanged,
-  signInWithPopup,
-  signOut as firebaseSignOut,
-} from 'firebase/auth'
-import { auth, isFirebaseConfigured } from '../lib/firebase.js'
 import { apiUrl } from '../lib/api.js'
 import { getTrackingIds } from '../lib/visitorTracking.js'
 
 const AuthContext = createContext(null)
-const googleProvider = new GoogleAuthProvider()
+const TOKEN_KEY = 'bv_access_token'
+const USER_KEY = 'bv_auth_user'
 
-function mapFirebaseUser(firebaseUser) {
-  return {
-    uid: firebaseUser.uid,
-    email: firebaseUser.email || null,
-    name: firebaseUser.displayName || null,
-    picture: firebaseUser.photoURL || null,
-    emailVerified: Boolean(firebaseUser.emailVerified),
-    provider: 'google.com',
+function readStoredToken() {
+  try {
+    return localStorage.getItem(TOKEN_KEY) || null
+  } catch {
+    return null
   }
 }
 
-function syncUserWithBackend(idToken) {
-  const ids = getTrackingIds()
-  return fetch(apiUrl('/api/auth/google'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      idToken,
-      sessionId: ids.sessionId,
-      visitorId: ids.visitorId,
-    }),
-    keepalive: true,
-  }).catch(() => null)
+function readStoredUser() {
+  try {
+    const raw = localStorage.getItem(USER_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function persistSession(token, user) {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token)
+    else localStorage.removeItem(TOKEN_KEY)
+    if (user) localStorage.setItem(USER_KEY, JSON.stringify(user))
+    else localStorage.removeItem(USER_KEY)
+  } catch {
+    // ignore quota / private mode
+  }
 }
 
 export async function getAccessToken() {
-  if (!auth?.currentUser) return null
-  return auth.currentUser.getIdToken(false)
+  return readStoredToken()
 }
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null)
+  const [user, setUser] = useState(() => readStoredUser())
   const [loading, setLoading] = useState(true)
   const [signingIn, setSigningIn] = useState(false)
   const [error, setError] = useState('')
-  const syncingUid = useRef(null)
 
-  const syncBackendInBackground = useCallback((firebaseUser) => {
-    if (!firebaseUser || syncingUid.current === firebaseUser.uid) return
-    syncingUid.current = firebaseUser.uid
-
-    const run = () => {
-      void firebaseUser
-        .getIdToken(false)
-        .then((idToken) => syncUserWithBackend(idToken))
-        .finally(() => {
-          if (syncingUid.current === firebaseUser.uid) {
-            syncingUid.current = null
-          }
-        })
-    }
-
-    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-      window.requestIdleCallback(run, { timeout: 1500 })
-    } else {
-      window.setTimeout(run, 0)
-    }
+  const applySession = useCallback((token, nextUser) => {
+    persistSession(token, nextUser)
+    setUser(nextUser)
   }, [])
 
+  const refreshProfile = useCallback(async () => {
+    const token = readStoredToken()
+    if (!token) {
+      setUser(null)
+      return null
+    }
+
+    const res = await fetch(apiUrl('/api/auth/me'), {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    })
+
+    if (!res.ok) {
+      persistSession(null, null)
+      setUser(null)
+      return null
+    }
+
+    const data = await res.json()
+    const nextUser = {
+      uid: data.user?.uid,
+      email: data.user?.email || null,
+      name: data.user?.name || null,
+      phone: data.user?.phone || null,
+      picture: data.user?.picture || null,
+      emailVerified: Boolean(data.user?.emailVerified),
+      provider: data.user?.provider || 'local',
+      tenantId: data.user?.tenantId || null,
+      subscription: data.subscription || data.user?.subscription || null,
+    }
+    applySession(token, nextUser)
+    return nextUser
+  }, [applySession])
+
   useEffect(() => {
-    if (!isFirebaseConfigured() || !auth) {
-      setLoading(false)
-      return undefined
-    }
-
-    let active = true
-
-    // Restore cached session ASAP (IndexedDB), then attach listener.
-    void auth.authStateReady().then(() => {
-      if (!active) return
-      const current = auth.currentUser
-      if (current) {
-        setUser(mapFirebaseUser(current))
-        syncBackendInBackground(current)
+    let cancelled = false
+    ;(async () => {
+      try {
+        if (readStoredToken()) {
+          await refreshProfile()
+        }
+      } catch {
+        if (!cancelled) {
+          persistSession(null, null)
+          setUser(null)
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-      setLoading(false)
-    })
-
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      if (!firebaseUser) {
-        setUser(null)
-        setLoading(false)
-        return
-      }
-
-      setUser(mapFirebaseUser(firebaseUser))
-      setLoading(false)
-      syncBackendInBackground(firebaseUser)
-    })
-
+    })()
     return () => {
-      active = false
-      unsubscribe()
+      cancelled = true
     }
-  }, [syncBackendInBackground])
+  }, [refreshProfile])
 
-  async function signInWithGoogle() {
-    if (!auth) {
-      setError('Firebase is not configured. Add your Firebase keys to frontend/.env')
-      return null
-    }
-
+  /**
+   * Create or restore account with name + email + phone.
+   * Returns the signed-in user object.
+   */
+  async function signInWithDetails({ name, email, phone }) {
+    setSigningIn(true)
     setError('')
-
     try {
-      setSigningIn(true)
-      const result = await signInWithPopup(auth, googleProvider)
-      const mapped = mapFirebaseUser(result.user)
-      setUser(mapped)
-      syncBackendInBackground(result.user)
-      return mapped
+      const ids = getTrackingIds()
+      let res
+      try {
+        res = await fetch(apiUrl('/api/auth/login'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            email,
+            phone,
+            sessionId: ids.sessionId,
+            visitorId: ids.visitorId,
+          }),
+        })
+      } catch {
+        throw new Error(
+          'Could not reach the server. Check your internet connection and try again.',
+        )
+      }
+
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(
+          data.message ||
+            (res.status === 404
+              ? 'Sign-in service is updating. Please try again in a minute.'
+              : `Could not sign in (${res.status}). Please try again.`),
+        )
+      }
+
+      if (!data.accessToken || !data.user?.uid) {
+        throw new Error('Sign-in response was incomplete. Please try again.')
+      }
+
+      const nextUser = {
+        uid: data.user.uid,
+        email: data.user.email || null,
+        name: data.user.name || null,
+        phone: data.user.phone || null,
+        picture: null,
+        emailVerified: true,
+        provider: 'local',
+        tenantId: data.user.tenantId || null,
+        subscription: data.subscription || data.user.subscription || null,
+      }
+      applySession(data.accessToken, nextUser)
+      return nextUser
     } catch (err) {
-      if (err.code === 'auth/popup-closed-by-user') {
-        return null
-      }
-      if (err.code === 'auth/popup-blocked') {
-        setError('Popup blocked. Allow popups for this site and try again.')
-        return null
-      }
-      if (err.code === 'auth/unauthorized-domain') {
-        setError(
-          'This domain is not allowed in Firebase. Add it in Firebase Console → Authentication → Settings → Authorized domains.',
-        )
-        return null
-      }
-      if (err.code === 'auth/operation-not-allowed') {
-        setError(
-          'Google sign-in is disabled. Enable Google in Firebase Authentication → Sign-in method.',
-        )
-        return null
-      }
-      setError(err.message || 'Google sign in failed.')
-      return null
+      const message = err.message || 'Sign in failed.'
+      setError(message)
+      throw err
     } finally {
       setSigningIn(false)
     }
   }
 
   async function signOut() {
-    setError('')
-    syncingUid.current = null
     try {
-      const token = await getAccessToken()
+      const token = readStoredToken()
+      const ids = getTrackingIds()
       if (token) {
-        const ids = getTrackingIds()
         void fetch(apiUrl('/api/auth/logout'), {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
           },
           body: JSON.stringify({ sessionId: ids.sessionId }),
           keepalive: true,
         }).catch(() => null)
       }
-    } catch {
-      // ignore
+    } finally {
+      persistSession(null, null)
+      setUser(null)
+      setError('')
     }
-    if (auth) {
-      await firebaseSignOut(auth)
-    }
-    setUser(null)
   }
 
   const value = useMemo(
@@ -190,23 +203,19 @@ export function AuthProvider({ children }) {
       loading,
       signingIn,
       error,
-      isConfigured: isFirebaseConfigured(),
-      signInWithGoogle,
+      signInWithDetails,
       signOut,
-      getAccessToken,
+      refreshProfile,
+      isConfigured: true,
     }),
-    [user, loading, signingIn, error],
+    [user, loading, signingIn, error, refreshProfile],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {
-  const context = useContext(AuthContext)
-
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider')
-  }
-
-  return context
+  const ctx = useContext(AuthContext)
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider')
+  return ctx
 }

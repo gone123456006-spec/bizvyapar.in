@@ -27,7 +27,7 @@ async function upsertTenant(client, { email, uid }) {
     await client.query(
       `UPDATE tenants
        SET email = COALESCE($2, email),
-           uid = COALESCE($3, uid),
+           uid = COALESCE(uid, $3),
            updated_at = $4::timestamptz
        WHERE tenant_id = $1`,
       [tenantId, normalizedEmail, normalizedUid, now],
@@ -63,7 +63,7 @@ async function ensureProfile(client, tenantId, identity = {}) {
      )
      ON CONFLICT (tenant_id) DO UPDATE SET
        email = COALESCE(EXCLUDED.email, profiles.email),
-       uid = COALESCE(EXCLUDED.uid, profiles.uid),
+       uid = COALESCE(profiles.uid, EXCLUDED.uid),
        name = COALESCE(EXCLUDED.name, profiles.name),
        phone = COALESCE(EXCLUDED.phone, profiles.phone),
        picture = COALESCE(EXCLUDED.picture, profiles.picture),
@@ -188,11 +188,12 @@ export async function pgTouchLogin(identity) {
        SET last_login_at = $2::timestamptz,
            updated_at = $2::timestamptz,
            email = COALESCE($3, email),
-           uid = COALESCE($4, uid),
+           uid = COALESCE(uid, $4),
            name = COALESCE($5, name),
-           picture = COALESCE($6, picture),
-           provider = COALESCE($7, provider),
-           email_verified = COALESCE($8, email_verified)
+           phone = COALESCE($6, phone),
+           picture = COALESCE($7, picture),
+           provider = COALESCE($8, provider),
+           email_verified = COALESCE($9, email_verified)
        WHERE tenant_id = $1`,
       [
         tenantId,
@@ -200,6 +201,7 @@ export async function pgTouchLogin(identity) {
         identity.email || null,
         identity.uid || null,
         identity.name || null,
+        identity.phone || null,
         identity.picture || null,
         identity.provider || null,
         identity.emailVerified ?? null,

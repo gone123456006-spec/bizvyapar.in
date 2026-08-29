@@ -346,7 +346,7 @@ function loadRazorpayScript() {
 async function createPaymentOrder(lead) {
   const token = await getAccessToken()
   if (!token) {
-    throw new Error('Please sign in with Google before payment.')
+    throw new Error('Please enter your details to continue payment.')
   }
 
   let orderRes
@@ -403,7 +403,7 @@ function FieldIcon({ filled, children }) {
 
 export default function App() {
   const navigate = useNavigate()
-  const { user, signingIn, error, signInWithGoogle, signOut } = useAuth()
+  const { user, signingIn, error, signInWithDetails, signOut } = useAuth()
   const publicSettings = usePublicSettings(4000)
   const amountLabel = publicSettings.amountLabel || '₹1'
   const [name, setName] = useState('')
@@ -636,6 +636,11 @@ export default function App() {
         openPaidLinksPopup()
         return
       }
+      if (user.name) setName(user.name)
+      if (user.email) setEmail(user.email)
+      if (user.phone) {
+        setPhone(String(user.phone).replace(/\D/g, '').slice(-10))
+      }
     }
 
     setJoinStep('details')
@@ -706,19 +711,18 @@ export default function App() {
     }
 
     try {
-      let activeUser = user
-      if (!activeUser) {
-        setMessage('Please sign in with Google to continue…')
-        activeUser = await signInWithGoogle()
-        if (!activeUser) {
-          throw new Error('Google sign-in is required before payment.')
-        }
-      }
+      setMessage('Saving your details…')
+      const activeUser = await signInWithDetails({
+        name: name.trim(),
+        email: email.trim(),
+        phone,
+      })
 
       const lockedEmail = (activeUser.email || email).trim()
-      const lockedName = (name || activeUser.name || '').trim()
+      const lockedName = (activeUser.name || name).trim()
       setEmail(lockedEmail)
-      if (!name.trim() && activeUser.name) setName(activeUser.name)
+      setName(lockedName)
+      if (activeUser.phone) setPhone(String(activeUser.phone).replace(/\D/g, '').slice(-10))
 
       setStatus('idle')
       setMessage('')
@@ -730,7 +734,7 @@ export default function App() {
       })
     } catch (error) {
       setStatus('error')
-      setMessage(error.message || 'Please sign in with Google first.')
+      setMessage(error.message || 'Could not save your details. Please try again.')
     }
   }
 
@@ -746,11 +750,12 @@ export default function App() {
     try {
       let activeUser = user
       if (!activeUser) {
-        setMessage('Please sign in with Google to continue payment…')
-        activeUser = await signInWithGoogle()
-        if (!activeUser) {
-          throw new Error('Please sign in with Google first, then pay.')
-        }
+        setMessage('Saving your details…')
+        activeUser = await signInWithDetails({
+          name: name.trim(),
+          email: email.trim(),
+          phone,
+        })
       }
 
       const payName = (name || activeUser.name || '').trim()
@@ -977,7 +982,7 @@ export default function App() {
               <button
                 className="nav-signin"
                 type="button"
-                onClick={signInWithGoogle}
+                onClick={openJoinForm}
                 disabled={signingIn}
               >
                 {signingIn ? 'Signing in…' : 'Sign In'}
@@ -998,7 +1003,7 @@ export default function App() {
                 type="button"
                 onClick={() => {
                   if (!user) {
-                    signInWithGoogle()
+                    void openJoinForm()
                     return
                   }
                   setShowProfileMenu((open) => !open)
@@ -1006,7 +1011,7 @@ export default function App() {
                 aria-label={user ? 'Open profile menu' : 'Profile'}
                 aria-expanded={user ? showProfileMenu : undefined}
                 aria-haspopup={user ? 'menu' : undefined}
-                title={user ? user.name || user.email : 'Sign in with Google'}
+                title={user ? user.name || user.email : 'Sign in with your details'}
               >
                 {user?.picture ? (
                   <img

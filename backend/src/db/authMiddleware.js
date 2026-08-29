@@ -1,5 +1,23 @@
-import { verifyFirebaseIdToken } from '../firebaseAdmin.js'
+import { verifyAccessToken } from '../localAuth.js'
 import { findTenantIdByEmail, findTenantIdByUid } from './userDb.js'
+
+async function resolveAuthFromToken(idToken) {
+  const local = await verifyAccessToken(idToken)
+  const tenantId =
+    (await findTenantIdByUid(local.uid)) ||
+    (local.email ? await findTenantIdByEmail(local.email) : null)
+
+  return {
+    uid: local.uid,
+    email: local.email,
+    name: local.name,
+    phone: local.phone || null,
+    picture: null,
+    emailVerified: Boolean(local.emailVerified),
+    provider: local.provider || 'local',
+    tenantId,
+  }
+}
 
 export async function requireAuth(req, res, next) {
   try {
@@ -8,29 +26,11 @@ export async function requireAuth(req, res, next) {
 
     if (!idToken) {
       return res.status(401).json({
-        message: 'Please sign in with Google before continuing.',
+        message: 'Please enter your name, email, and phone to continue.',
       })
     }
 
-    const decoded = await verifyFirebaseIdToken(idToken)
-    if (!decoded?.uid) {
-      return res.status(401).json({ message: 'Invalid Google session.' })
-    }
-
-    const tenantId =
-      (await findTenantIdByUid(decoded.uid)) ||
-      (decoded.email ? await findTenantIdByEmail(decoded.email) : null)
-
-    req.auth = {
-      uid: decoded.uid,
-      email: decoded.email || null,
-      name: decoded.name || null,
-      picture: decoded.picture || null,
-      emailVerified: Boolean(decoded.email_verified),
-      provider: decoded.firebase?.sign_in_provider || 'google.com',
-      tenantId,
-    }
-
+    req.auth = await resolveAuthFromToken(idToken)
     return next()
   } catch (error) {
     return res.status(error.status || 401).json({
@@ -48,20 +48,7 @@ export async function optionalAuth(req, _res, next) {
       return next()
     }
 
-    const decoded = await verifyFirebaseIdToken(idToken)
-    const tenantId =
-      (await findTenantIdByUid(decoded.uid)) ||
-      (decoded.email ? await findTenantIdByEmail(decoded.email) : null)
-
-    req.auth = {
-      uid: decoded.uid,
-      email: decoded.email || null,
-      name: decoded.name || null,
-      picture: decoded.picture || null,
-      emailVerified: Boolean(decoded.email_verified),
-      provider: decoded.firebase?.sign_in_provider || 'google.com',
-      tenantId,
-    }
+    req.auth = await resolveAuthFromToken(idToken)
   } catch {
     req.auth = null
   }

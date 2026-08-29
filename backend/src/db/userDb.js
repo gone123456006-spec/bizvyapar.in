@@ -119,6 +119,7 @@ export async function touchLogin(identity) {
       email: identity.email || db.profile.email || null,
       uid: identity.uid || db.profile.uid || null,
       name: identity.name || db.profile.name || null,
+      phone: identity.phone || db.profile.phone || null,
       picture: identity.picture || db.profile.picture || null,
       provider: identity.provider || db.profile.provider || null,
       emailVerified: identity.emailVerified ?? db.profile.emailVerified ?? false,

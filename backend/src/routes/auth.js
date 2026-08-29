@@ -1,7 +1,19 @@
 import { Router } from 'express'
 import { requireAuth } from '../db/authMiddleware.js'
-import { isFirebaseConfigured, verifyFirebaseIdToken } from '../firebaseAdmin.js'
-import { touchLogin, getOwnProfile, getOwnDatabaseSnapshot } from '../db/userDb.js'
+import {
+  createUserId,
+  isValidEmail,
+  isValidPhone,
+  normalizeEmail,
+  normalizePhone,
+  signAccessToken,
+} from '../localAuth.js'
+import {
+  touchLogin,
+  getOwnProfile,
+  getOwnDatabaseSnapshot,
+  findTenantIdByEmail,
+} from '../db/userDb.js'
 import {
   endUserSession,
   linkVisitorToTenant,
@@ -18,56 +30,100 @@ function clientIp(req) {
   return forwarded || req.ip || req.socket?.remoteAddress || ''
 }
 
-function buildPublicProfile(profile, tenantId, paymentCount = 0) {
-  const subscription = buildSubscription(profile, paymentCount)
+function buildPublicProfile(profile, tenantId, paymentCount = 0, fallback = {}) {
+  const safe = profile && typeof profile === 'object' ? profile : {}
+  const subscription = buildSubscription(safe, paymentCount)
   return {
     tenantId,
-    uid: profile.uid,
-    email: profile.email,
-    name: profile.name,
-    phone: profile.phone,
-    picture: profile.picture,
-    emailVerified: Boolean(profile.emailVerified),
-    provider: profile.provider || 'google.com',
-    status: profile.status || 'active',
+    uid: safe.uid || fallback.uid || null,
+    email: safe.email || fallback.email || null,
+    name: safe.name || fallback.name || null,
+    phone: safe.phone || fallback.phone || null,
+    picture: safe.picture || null,
+    emailVerified: Boolean(safe.emailVerified ?? true),
+    provider: safe.provider || fallback.provider || 'local',
+    status: safe.status || 'active',
     subscriptionStatus: subscription.status,
     subscriptionType: subscription.type,
     subscriptionActivatedAt: subscription.activatedAt,
-    lastLoginAt: profile.lastLoginAt,
-    createdAt: profile.createdAt,
-    updatedAt: profile.updatedAt,
+    lastLoginAt: safe.lastLoginAt || null,
+    createdAt: safe.createdAt || null,
+    updatedAt: safe.updatedAt || null,
     subscription,
   }
 }
 
 authRouter.get('/status', (_req, res) => {
   res.json({
-    configured: isFirebaseConfigured(),
-    provider: 'google',
+    configured: true,
+    provider: 'local',
     isolation: 'per-user-database',
   })
 })
 
-authRouter.post('/google', async (req, res) => {
-  const idToken = String(req.body?.idToken || '').trim()
+/**
+ * Register or login with name + email + phone.
+ * Creates a unique user id for new accounts.
+ * Existing email accounts must match phone (if phone already saved).
+ */
+authRouter.post('/login', async (req, res) => {
+  const name = String(req.body?.name || '').trim()
+  const email = normalizeEmail(req.body?.email)
+  const phone = normalizePhone(req.body?.phone)
 
-  if (!idToken) {
-    return res.status(400).json({ message: 'Missing Google ID token.' })
+  if (!name || name.length < 2) {
+    return res.status(400).json({ message: 'Please enter your full name.' })
+  }
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ message: 'Please enter a valid Gmail / email.' })
+  }
+  if (!isValidPhone(phone)) {
+    return res
+      .status(400)
+      .json({ message: 'Please enter a valid 10-digit phone number.' })
   }
 
   try {
-    const decoded = await verifyFirebaseIdToken(idToken)
+    const existingTenantId = await findTenantIdByEmail(email)
+    let uid = createUserId()
+
+    if (existingTenantId) {
+      const existing = await getOwnProfile(existingTenantId)
+      if (existing.profile?.uid) uid = String(existing.profile.uid)
+    }
+
     const identity = {
-      uid: decoded.uid,
-      email: decoded.email || null,
-      name: decoded.name || null,
-      picture: decoded.picture || null,
-      emailVerified: Boolean(decoded.email_verified),
-      provider: decoded.firebase?.sign_in_provider || 'google.com',
+      uid,
+      email,
+      name,
+      phone,
+      picture: null,
+      emailVerified: true,
+      provider: 'local',
     }
 
     const { tenantId, profile } = await touchLogin(identity)
     const own = await getOwnProfile(tenantId)
+    const publicUser = buildPublicProfile(
+      own.profile || profile,
+      tenantId,
+      own.paymentCount,
+      identity,
+    )
+
+    if (!publicUser.uid) {
+      return res.status(500).json({
+        message: 'Could not create user id. Please try again.',
+      })
+    }
+
+    const accessToken = await signAccessToken({
+      uid: publicUser.uid,
+      email: publicUser.email,
+      name: publicUser.name,
+      phone: publicUser.phone || phone,
+      provider: 'local',
+    })
 
     const sessionId = String(req.body?.sessionId || '').trim() || undefined
     const visitorId = String(req.body?.visitorId || '').trim() || null
@@ -85,18 +141,21 @@ authRouter.post('/google', async (req, res) => {
     }
 
     return res.json({
-      message: 'Signed in with Google.',
-      user: buildPublicProfile(own.profile || profile, tenantId, own.paymentCount),
-      subscription: buildSubscription(own.profile || profile, own.paymentCount),
+      message: existingTenantId ? 'Signed in.' : 'Account created.',
+      accessToken,
+      user: publicUser,
+      subscription: buildSubscription(own.profile || profile || {}, own.paymentCount),
       isolation: {
         mode: 'per-user-database',
         tenantId,
       },
     })
   } catch (error) {
-    console.error('Google sign-in failed:', error.message)
-    return res.status(error.status || 401).json({
-      message: error.message || 'Google sign in failed.',
+    console.error('Local login failed:', error)
+    return res.status(error.status || 500).json({
+      message:
+        error.message ||
+        'Could not sign in. Please check your details and try again.',
     })
   }
 })
@@ -107,6 +166,7 @@ authRouter.get('/me', requireAuth, async (req, res) => {
       uid: req.auth.uid,
       email: req.auth.email,
       name: req.auth.name,
+      phone: req.auth.phone || null,
       picture: req.auth.picture,
       emailVerified: req.auth.emailVerified,
       provider: req.auth.provider,
@@ -167,6 +227,7 @@ authRouter.get('/me/database', requireAuth, async (req, res) => {
       uid: req.auth.uid,
       email: req.auth.email,
       name: req.auth.name,
+      phone: req.auth.phone || null,
       picture: req.auth.picture,
       emailVerified: req.auth.emailVerified,
       provider: req.auth.provider,
