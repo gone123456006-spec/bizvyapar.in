@@ -1944,20 +1944,6 @@ export default function App() {
                       </FieldIcon>
                     </label>
 
-                    <label className="consent">
-                      <input
-                        type="checkbox"
-                        checked={consent}
-                        onChange={(e) => setConsent(e.target.checked)}
-                      />
-                      <span>
-                        I authorise BizVyapar &amp; its representatives to
-                        contact me with updates and notifications via
-                        Email/SMS/WhatsApp/Call and other channels, even if my
-                        number is registered on DND/NDNC.
-                      </span>
-                    </label>
-
                     {status === 'error' && message ? (
                       <p className="form-error" role="alert">
                         {/password/i.test(message)
@@ -1972,11 +1958,25 @@ export default function App() {
                       disabled={status === 'loading' || signingIn}
                     >
                       {status === 'loading' || signingIn
-                        ? 'Please wait…'
+                        ? authMode === 'signin'
+                          ? 'Signing in…'
+                          : 'Creating account…'
                         : authMode === 'signin'
                           ? 'Sign In'
                           : 'Sign Up'}
                     </button>
+
+                    <label className="consent consent--compact">
+                      <input
+                        type="checkbox"
+                        checked={consent}
+                        onChange={(e) => setConsent(e.target.checked)}
+                      />
+                      <span>
+                        I authorise BizVyapar to contact me via
+                        Email/SMS/WhatsApp/Call (even if on DND/NDNC).
+                      </span>
+                    </label>
 
                     <p className="form-note">
                       {authMode === 'signup'

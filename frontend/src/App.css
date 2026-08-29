@@ -1212,6 +1212,15 @@
   line-height: 1.45;
 }
 
+.consent--compact {
+  margin-top: 4px;
+}
+
+.consent--compact span {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .btn-trial {
   display: inline-flex;
   align-items: center;
@@ -3463,10 +3472,12 @@
 /* —— Join form modal —— */
 .join-form-overlay {
   z-index: 110;
-  align-items: start;
+  align-items: flex-start;
+  justify-content: center;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 24px 16px;
+  -webkit-overflow-scrolling: touch;
+  padding: 16px 12px 32px;
   overscroll-behavior: contain;
   width: 100%;
   max-width: 100%;
@@ -3475,7 +3486,8 @@
 .join-form-modal {
   position: relative;
   width: min(100%, 440px);
-  margin: auto;
+  margin: 12px auto 24px;
+  max-height: none;
 }
 
 .join-form-close {
@@ -3501,9 +3513,21 @@
 
 .join-form-modal .join-card {
   box-sizing: border-box;
-  padding: 28px 24px 16px;
+  padding: 24px 20px 18px;
   border-radius: 20px;
   box-shadow: 0 20px 48px rgba(16, 80, 64, 0.18);
+  overflow: visible;
+}
+
+.join-form-modal .join-form {
+  padding-bottom: 4px;
+}
+
+.join-form-modal .btn-trial {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin-top: 4px;
 }
 
 @media (max-width: 520px) {

@@ -278,7 +278,15 @@ export function AuthProvider({ children }) {
   }
 
   async function register({ name, email, phone }) {
-    return authRequest('/api/auth/register', { name, email, phone })
+    try {
+      return await authRequest('/api/auth/register', { name, email, phone })
+    } catch (err) {
+      // Already registered → continue as Sign In so Sign Up never dead-ends
+      if (/already exists|Please Sign In/i.test(err.message || '')) {
+        return login({ email, phone })
+      }
+      throw err
+    }
   }
 
   async function login({ email, phone }) {
@@ -286,15 +294,7 @@ export function AuthProvider({ children }) {
   }
 
   async function signInWithDetails({ name, email, phone }) {
-    // Join/Next: create if new, otherwise sign in
-    try {
-      return await register({ name, email, phone })
-    } catch (err) {
-      if (/already exists|Sign In/i.test(err.message || '')) {
-        return login({ email, phone })
-      }
-      throw err
-    }
+    return register({ name, email, phone })
   }
 
   async function signOut() {

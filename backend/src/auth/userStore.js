@@ -321,7 +321,7 @@ export async function loginWithEmailPhone({ email, phone }) {
 
 /**
  * Sign Up — Name + Gmail + mobile (new accounts only).
- * Optimized: one CTE insert (user + subscription); skip pre-read.
+ * Reliable transaction insert (user + subscription).
  */
 export async function registerUser({ name, email, phone }) {
   assertPostgres()
@@ -331,47 +331,57 @@ export async function registerUser({ name, email, phone }) {
     phone,
   })
 
+  const existing = await findUserByEmail(cleanEmail)
+  if (existing) {
+    // Treat as Sign In so the client can continue without a hard stop
+    return loginWithEmailPhone({ email: cleanEmail, phone: cleanPhone })
+  }
+
   const userId = newUserId()
   const subId = randomUUID()
   const db = getPool()
+  const client = await db.connect()
   let row
   try {
-    const inserted = await db.query(
-      `WITH new_user AS (
-         INSERT INTO users (
-           id, email, password_hash, name, phone, email_verified, provider, status
-         ) VALUES ($1, $2, NULL, $3, $4, FALSE, 'local', 'active')
-         RETURNING *
-       ),
-       new_sub AS (
-         INSERT INTO subscriptions (id, user_id, plan, status, expires_at, activated_at)
-         SELECT $5, id, NULL, 'none', NULL, NULL FROM new_user
-       )
-       SELECT * FROM new_user`,
-      [userId, cleanEmail, cleanName, cleanPhone, subId],
+    await client.query('BEGIN')
+    const inserted = await client.query(
+      `INSERT INTO users (
+         id, email, password_hash, name, phone, email_verified, provider, status
+       ) VALUES ($1, $2, NULL, $3, $4, FALSE, 'local', 'active')
+       RETURNING *`,
+      [userId, cleanEmail, cleanName, cleanPhone],
     )
     row = inserted.rows[0]
+    if (!row) {
+      throw new Error('Could not create account. Please try again.')
+    }
+    await client.query(
+      `INSERT INTO subscriptions (id, user_id, plan, status, expires_at, activated_at)
+       VALUES ($1, $2, NULL, 'none', NULL, NULL)`,
+      [subId, userId],
+    )
+    await client.query('COMMIT')
   } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined)
     if (error?.code === '23505') {
-      const dup = new Error('Account already exists. Please Sign In.')
-      dup.status = 409
-      throw dup
+      // Race: created between check and insert — sign them in
+      return loginWithEmailPhone({ email: cleanEmail, phone: cleanPhone })
     }
     throw error
+  } finally {
+    client.release()
   }
 
   const user = mapUser(row)
+  const tenantId = await ensureTenantForUser(user)
+  void migrateLegacyLifetimeByEmail(cleanEmail, userId).catch(() => undefined)
 
-  const [tenantId, didMigrate] = await Promise.all([
-    ensureTenantForUser(user),
-    migrateLegacyLifetimeByEmail(cleanEmail, userId),
-  ])
-
-  const subscription = didMigrate
-    ? await getSubscriptionByUserId(userId)
-    : mapSubscription(null)
-
-  return { user, tenantId, created: true, subscription }
+  return {
+    user,
+    tenantId,
+    created: true,
+    subscription: mapSubscription(null),
+  }
 }
 
 /** Join / Next flow — sign up if new, otherwise sign in with email+phone. */
