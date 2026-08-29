@@ -32,7 +32,7 @@ function userFacingAuthError(error, fallback = 'Something went wrong. Please try
   if (/password/i.test(raw)) {
     return {
       status: error?.status && error.status >= 400 ? error.status : 401,
-      message: 'Could not sign in. Use the same name, email, and mobile.',
+      message: 'Use the same Gmail and mobile number registered on this account.',
     }
   }
   if (
@@ -41,7 +41,7 @@ function userFacingAuthError(error, fallback = 'Something went wrong. Please try
   ) {
     return {
       status: 409,
-      message: 'Could not sign in. Use the same name, email, and mobile.',
+      message: 'Use the same Gmail and mobile number registered on this account.',
     }
   }
   if (error?.status && error.status >= 400 && error.status < 500) {
@@ -123,7 +123,7 @@ async function completeAuth(req, res) {
     console.error('Auth failed:', error.message)
     const facing = userFacingAuthError(
       error,
-      'Could not sign in. Check your name, email, and mobile.',
+      'Use the same Gmail and mobile number registered on this account.',
     )
     return res.status(facing.status).json({ message: facing.message })
   }

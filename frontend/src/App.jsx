@@ -1844,7 +1844,8 @@ export default function App() {
                 <>
                   <h2 id="join-form-title">Sign in</h2>
                   <p className="join-sub">
-                    Enter your name, Gmail, and mobile number.
+                    New user: add your name, Gmail, and mobile.
+                    Returning user: enter the same Gmail and mobile number.
                   </p>
 
                   <form className="join-form" onSubmit={handleDetailsNext} noValidate>

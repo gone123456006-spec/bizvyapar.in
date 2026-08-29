@@ -254,9 +254,9 @@ async function upsertProfileForTenant(db, tenantId, { email, userId, name, phone
 
 /**
  * Name + Email + Phone auth (no password).
- * - New email → create permanent random UUID userId + empty subscription
- * - Existing email + exact same name + phone → same userId + subscription
- * - Existing email but name/phone differ → reject (do not create new account)
+ * - New Gmail → create permanent random UUID userId + subscription row
+ * - Existing Gmail → must use the exact same mobile to open same userId + subscription
+ * - Name is required, but returning users are keyed by Gmail + mobile
  */
 export async function signInWithDetails({ name, email, phone }) {
   assertPostgres()
@@ -274,14 +274,14 @@ export async function signInWithDetails({ name, email, phone }) {
       throw error
     }
 
-    const phoneOk = normalizePhone(existing.phone) === cleanPhone
-    const nameOk = namesMatch(existing.name, cleanName)
-    // Legacy accounts may have no phone yet — attach it on first passwordless login
-    const phoneMissing = !normalizePhone(existing.phone)
+    const storedPhone = normalizePhone(existing.phone)
+    const phoneMissing = !storedPhone
+    const phoneOk = storedPhone === cleanPhone
 
-    if (!nameOk || (!phoneOk && !phoneMissing)) {
+    // Returning user must enter the exact same mobile for this Gmail
+    if (!phoneMissing && !phoneOk) {
       const error = new Error(
-        'Name or mobile does not match this email. Use the exact details from your account.',
+        'Use the same Gmail and mobile number registered on this account.',
       )
       error.status = 401
       throw error
@@ -291,7 +291,7 @@ export async function signInWithDetails({ name, email, phone }) {
     await db.query(
       `UPDATE users
        SET name = $2,
-           phone = COALESCE(phone, $3),
+           phone = $3,
            failed_login_attempts = 0,
            locked_until = NULL,
            last_login_at = NOW(),
@@ -328,7 +328,6 @@ export async function signInWithDetails({ name, email, phone }) {
   } catch (error) {
     await client.query('ROLLBACK')
     if (error?.code === '23505') {
-      // Race: treat as login retry
       return signInWithDetails({ name, email, phone })
     }
     throw error

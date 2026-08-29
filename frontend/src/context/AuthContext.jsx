@@ -68,10 +68,10 @@ function toUserAuthMessage(raw, fallback = 'Something went wrong. Please try aga
   const msg = String(raw || '').trim()
   if (!msg) return fallback
   if (/password/i.test(msg)) {
-    return 'Could not sign in. Use the same name, email, and mobile.'
+    return 'Use the same Gmail and mobile number registered on this account.'
   }
   if (/duplicate key|unique constraint|tenants_email|users_email|SQLSTATE|ECONN|postgres/i.test(msg)) {
-    return 'Could not sign in. Use the same name, email, and mobile.'
+    return 'Use the same Gmail and mobile number registered on this account.'
   }
   if (/violates|constraint|internal server|stack|at Object\./i.test(msg)) {
     return fallback
