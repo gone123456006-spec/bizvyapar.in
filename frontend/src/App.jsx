@@ -403,7 +403,7 @@ function FieldIcon({ filled, children }) {
 
 export default function App() {
   const navigate = useNavigate()
-  const { user, signingIn, signInWithDetails, signOut, refreshProfile } =
+  const { user, signingIn, login, register, signOut, refreshProfile } =
     useAuth()
   const publicSettings = usePublicSettings(4000)
   const amountLabel = publicSettings.amountLabel || '₹1'
@@ -411,6 +411,7 @@ export default function App() {
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [consent, setConsent] = useState(true)
+  const [authMode, setAuthMode] = useState('signup') // 'signin' | 'signup'
   const [status, setStatus] = useState('idle')
   const [message, setMessage] = useState('')
   const [submitted, setSubmitted] = useState(null)
@@ -662,6 +663,7 @@ export default function App() {
       return
     }
 
+    setAuthMode('signup')
     setJoinStep('details')
     setStatus('idle')
     setSubmitted(null)
@@ -692,6 +694,8 @@ export default function App() {
       return
     }
 
+    // Always open Sign Up first; user can switch via “Sign In” link
+    setAuthMode('signup')
     setJoinStep('details')
     setStatus('idle')
     setSubmitted(null)
@@ -734,12 +738,6 @@ export default function App() {
     setStatus('loading')
     setMessage('')
 
-    if (!name.trim()) {
-      setStatus('error')
-      setMessage('Please enter your name.')
-      return
-    }
-
     if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       setStatus('error')
       setMessage('Please enter a valid email.')
@@ -753,6 +751,12 @@ export default function App() {
       return
     }
 
+    if (authMode === 'signup' && !name.trim()) {
+      setStatus('error')
+      setMessage('Please enter your name.')
+      return
+    }
+
     if (!consent) {
       setStatus('error')
       setMessage('Please accept the contact authorisation to continue.')
@@ -762,33 +766,47 @@ export default function App() {
     try {
       let activeUser = user
       if (!activeUser) {
-        setMessage('Saving your details…')
-        activeUser = await signInWithDetails({
-          name: name.trim(),
-          email: email.trim(),
-          phone: digits,
-        })
+        setMessage(authMode === 'signin' ? 'Signing in…' : 'Creating account…')
+        activeUser =
+          authMode === 'signin'
+            ? await login({ email: email.trim(), phone: digits })
+            : await register({
+                name: name.trim(),
+                email: email.trim(),
+                phone: digits,
+              })
       }
 
       const lockedEmail = (activeUser.email || email).trim()
       const lockedName = (activeUser.name || name).trim()
       setEmail(lockedEmail)
-      setName(lockedName)
+      if (lockedName) setName(lockedName)
       if (activeUser.phone) {
         setPhone(String(activeUser.phone).replace(/\D/g, '').slice(-10))
+      }
+
+      const paid =
+        (activeUser.subscription?.status === 'active' &&
+          activeUser.subscription?.plan === 'lifetime') ||
+        (await refreshSubscription())
+
+      if (paid) {
+        openPaidLinksPopup()
+        return
       }
 
       setStatus('idle')
       setMessage('')
       setJoinStep('payment')
       pendingOrderRef.current = createPaymentOrder({
-        name: lockedName,
+        name: lockedName || name.trim(),
         email: lockedEmail,
         phone: digits || activeUser.phone || '',
       })
+      void refreshProfile()
     } catch (err) {
       setStatus('error')
-      setMessage(err.message || 'Could not save your details. Please try again.')
+      setMessage(err.message || 'Could not continue. Please try again.')
     }
   }
 
@@ -1842,29 +1860,35 @@ export default function App() {
                 </>
               ) : (
                 <>
-                  <h2 id="join-form-title">Sign in</h2>
+                  <h2 id="join-form-title">
+                    {authMode === 'signin' ? 'Sign In' : 'Create a new account'}
+                  </h2>
                   <p className="join-sub">
-                    Enter your name, Gmail, and mobile number.
+                    {authMode === 'signin'
+                      ? 'Enter your Gmail and mobile number.'
+                      : 'Register with your name, Gmail, and mobile number.'}
                   </p>
 
                   <form className="join-form" onSubmit={handleDetailsNext} noValidate>
-                    <label className="pill-field">
-                      <span className="sr-only">Name</span>
-                      <input
-                        type="text"
-                        name="name"
-                        autoComplete="name"
-                        placeholder="Name"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        required
-                      />
-                      <FieldIcon filled={name.trim().length > 0}>
-                        <svg viewBox="0 0 24 24" focusable="false">
-                          <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
-                        </svg>
-                      </FieldIcon>
-                    </label>
+                    {authMode === 'signup' ? (
+                      <label className="pill-field">
+                        <span className="sr-only">Name</span>
+                        <input
+                          type="text"
+                          name="name"
+                          autoComplete="name"
+                          placeholder="Name"
+                          value={name}
+                          onChange={(e) => setName(e.target.value)}
+                          required
+                        />
+                        <FieldIcon filled={name.trim().length > 0}>
+                          <svg viewBox="0 0 24 24" focusable="false">
+                            <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+                          </svg>
+                        </FieldIcon>
+                      </label>
+                    ) : null}
 
                     <label className="pill-field">
                       <span className="sr-only">Email</span>
@@ -1872,7 +1896,7 @@ export default function App() {
                         type="email"
                         name="email"
                         autoComplete="email"
-                        placeholder="Email / Gmail"
+                        placeholder="Gmail"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         required
@@ -1933,10 +1957,29 @@ export default function App() {
                     >
                       {status === 'loading' || signingIn
                         ? 'Please wait…'
-                        : 'Next >'}
+                        : authMode === 'signin'
+                          ? 'Sign In'
+                          : 'Next >'}
                     </button>
 
-                    <div className="form-links-row">
+                    <p className="form-note">
+                      {authMode === 'signup'
+                        ? 'You already have an account?'
+                        : "Don't have an account?"}{' '}
+                      <button
+                        type="button"
+                        className="form-inline-link"
+                        onClick={() => {
+                          setAuthMode(authMode === 'signup' ? 'signin' : 'signup')
+                          setStatus('idle')
+                          setMessage('')
+                        }}
+                      >
+                        {authMode === 'signup' ? 'Sign In' : 'Sign Up'}
+                      </button>
+                    </p>
+
+                    <div className="form-links-row form-links-row--bottom">
                       <a
                         className="form-terms-link"
                         href="/terms"

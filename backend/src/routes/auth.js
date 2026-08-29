@@ -4,10 +4,11 @@ import { authRateLimit } from '../auth/rateLimit.js'
 import {
   getSubscriptionByUserId,
   issueTokenPair,
+  loginWithEmailPhone,
+  registerUser,
   revokeAllRefreshTokensForUser,
   revokeRefreshToken,
   rotateRefreshToken,
-  signInWithDetails,
   updateUserProfile,
 } from '../auth/userStore.js'
 import {
@@ -82,9 +83,9 @@ authRouter.get('/status', (_req, res) => {
   })
 })
 
-async function completeAuth(req, res) {
+async function completeAuth(req, res, authFn) {
   try {
-    const { user, tenantId, created } = await signInWithDetails({
+    const { user, tenantId, created } = await authFn({
       name: req.body?.name,
       email: req.body?.email,
       phone: req.body?.phone,
@@ -123,17 +124,21 @@ async function completeAuth(req, res) {
     console.error('Auth failed:', error.message)
     const facing = userFacingAuthError(
       error,
-      'Could not sign in. Please check your details and try again.',
+      'Could not continue. Please check your details.',
     )
     return res.status(facing.status).json({ message: facing.message })
   }
 }
 
-/** POST /api/auth/register — Name + Email + Phone */
-authRouter.post('/register', authRateLimit(), completeAuth)
+/** POST /api/auth/register — Sign Up (Name + Gmail + mobile) */
+authRouter.post('/register', authRateLimit(), (req, res) =>
+  completeAuth(req, res, registerUser),
+)
 
-/** POST /api/auth/login — Name + Email + Phone (exact match → same userId + subscription) */
-authRouter.post('/login', authRateLimit(), completeAuth)
+/** POST /api/auth/login — Sign In (Gmail + mobile only) */
+authRouter.post('/login', authRateLimit(), (req, res) =>
+  completeAuth(req, res, loginWithEmailPhone),
+)
 
 /** POST /api/auth/refresh — rotate refresh token, issue new access token */
 authRouter.post('/refresh', authRateLimit({ maxPerIp: 60 }), async (req, res) => {

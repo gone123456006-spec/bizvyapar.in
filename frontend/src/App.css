@@ -1251,15 +1251,77 @@
   margin: 10px 0 0;
   text-align: center;
   color: #7a878d;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .form-links-row {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-top: 12px;
+  gap: 12px;
+  margin-top: 8px;
   width: 100%;
+}
+
+.form-links-row--bottom {
+  margin-top: 6px;
+  margin-bottom: 2px;
+}
+
+.form-links-row--top {
+  margin: 0 0 10px;
+  justify-content: space-between;
+}
+
+.form-links-signin {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #006b3c;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  flex-shrink: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  box-shadow: none;
+  outline: none;
+}
+
+.form-links-signin:hover {
+  color: #055a33;
+}
+
+.form-links-signin:focus,
+.form-links-signin:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.form-inline-link {
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+  color: #006b3c;
+  font-size: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  box-shadow: none;
+  outline: none;
+}
+
+.form-inline-link:hover {
+  color: #055a33;
+}
+
+.form-inline-link:focus,
+.form-inline-link:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .form-terms-link {
@@ -1267,7 +1329,7 @@
   margin-top: 0;
   text-align: center;
   color: #006b3c;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 700;
   text-decoration: underline;
   text-underline-offset: 2px;

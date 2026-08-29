@@ -239,9 +239,9 @@ export function AuthProvider({ children }) {
           toUserAuthMessage(
             data.message,
             res.status === 404
-              ? 'Please try again in a moment.'
+              ? 'No account found. Please Sign Up.'
               : res.status === 409
-                ? 'This email is already registered. Use the same name and mobile to sign in.'
+                ? 'Account already exists. Please Sign In.'
                 : 'Something went wrong. Please try again.',
           ),
         )
@@ -273,13 +273,20 @@ export function AuthProvider({ children }) {
     return authRequest('/api/auth/register', { name, email, phone })
   }
 
-  async function login({ name, email, phone }) {
-    return authRequest('/api/auth/login', { name, email, phone })
+  async function login({ email, phone }) {
+    return authRequest('/api/auth/login', { email, phone })
   }
 
-  /** Same as login/register — name + email + phone */
   async function signInWithDetails({ name, email, phone }) {
-    return authRequest('/api/auth/login', { name, email, phone })
+    // Join/Next: create if new, otherwise sign in
+    try {
+      return await register({ name, email, phone })
+    } catch (err) {
+      if (/already exists|Sign In/i.test(err.message || '')) {
+        return login({ email, phone })
+      }
+      throw err
+    }
   }
 
   async function signOut() {

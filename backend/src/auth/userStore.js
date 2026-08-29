@@ -37,16 +37,10 @@ function namesMatch(a, b) {
   return sanitizeName(a).toLowerCase() === sanitizeName(b).toLowerCase()
 }
 
-function validateIdentity({ name, email, phone }) {
-  const cleanName = sanitizeName(name)
+function validateEmailPhone({ email, phone }) {
   const cleanEmail = normalizeEmail(email)
   const cleanPhone = normalizePhone(phone)
 
-  if (!cleanName || cleanName.length < 2) {
-    const error = new Error('Please enter your full name.')
-    error.status = 400
-    throw error
-  }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
     const error = new Error('Please enter a valid email address.')
     error.status = 400
@@ -54,6 +48,19 @@ function validateIdentity({ name, email, phone }) {
   }
   if (!cleanPhone || cleanPhone.length !== 10) {
     const error = new Error('Please enter a valid 10-digit mobile number.')
+    error.status = 400
+    throw error
+  }
+
+  return { cleanEmail, cleanPhone }
+}
+
+function validateIdentity({ name, email, phone }) {
+  const cleanName = sanitizeName(name)
+  const { cleanEmail, cleanPhone } = validateEmailPhone({ email, phone })
+
+  if (!cleanName || cleanName.length < 2) {
+    const error = new Error('Please enter your full name.')
     error.status = 400
     throw error
   }
@@ -253,12 +260,48 @@ async function upsertProfileForTenant(db, tenantId, { email, userId, name, phone
 }
 
 /**
- * Name + Email + Phone auth (no password).
- * - New Gmail → create permanent random UUID userId + subscription row
- * - Existing Gmail → always restore the same userId + subscription
- *   (name/mobile are updated from what they enter this time)
+ * Sign In — Gmail + mobile only (existing accounts).
  */
-export async function signInWithDetails({ name, email, phone }) {
+export async function loginWithEmailPhone({ email, phone }) {
+  assertPostgres()
+  const { cleanEmail, cleanPhone } = validateEmailPhone({ email, phone })
+
+  const existing = await findUserByEmail(cleanEmail)
+  if (!existing || existing.status === 'disabled') {
+    const error = new Error('No account found. Please Sign Up.')
+    error.status = 404
+    throw error
+  }
+
+  const storedPhone = normalizePhone(existing.phone)
+  if (storedPhone && storedPhone !== cleanPhone) {
+    const error = new Error(
+      'Mobile number does not match this Gmail. Try again.',
+    )
+    error.status = 401
+    throw error
+  }
+
+  const db = getPool()
+  await db.query(
+    `UPDATE users
+     SET phone = COALESCE(phone, $2),
+         failed_login_attempts = 0,
+         locked_until = NULL,
+         last_login_at = NOW(),
+         updated_at = NOW()
+     WHERE id = $1`,
+    [existing.id, cleanPhone],
+  )
+  const fresh = await findUserById(existing.id)
+  const tenantId = await ensureTenantForUser(fresh)
+  return { user: mapUser(fresh), tenantId, created: false }
+}
+
+/**
+ * Sign Up — Name + Gmail + mobile (new accounts only).
+ */
+export async function registerUser({ name, email, phone }) {
   assertPostgres()
   const { cleanName, cleanEmail, cleanPhone } = validateIdentity({
     name,
@@ -268,27 +311,9 @@ export async function signInWithDetails({ name, email, phone }) {
 
   const existing = await findUserByEmail(cleanEmail)
   if (existing) {
-    if (existing.status === 'disabled') {
-      const error = new Error('This account is unavailable. Contact support.')
-      error.status = 403
-      throw error
-    }
-
-    const db = getPool()
-    await db.query(
-      `UPDATE users
-       SET name = $2,
-           phone = $3,
-           failed_login_attempts = 0,
-           locked_until = NULL,
-           last_login_at = NOW(),
-           updated_at = NOW()
-       WHERE id = $1`,
-      [existing.id, cleanName, cleanPhone],
-    )
-    const fresh = await findUserById(existing.id)
-    const tenantId = await ensureTenantForUser(fresh)
-    return { user: mapUser(fresh), tenantId, created: false }
+    const error = new Error('Account already exists. Please Sign In.')
+    error.status = 409
+    throw error
   }
 
   const userId = newUserId()
@@ -315,7 +340,9 @@ export async function signInWithDetails({ name, email, phone }) {
   } catch (error) {
     await client.query('ROLLBACK')
     if (error?.code === '23505') {
-      return signInWithDetails({ name, email, phone })
+      const dup = new Error('Account already exists. Please Sign In.')
+      dup.status = 409
+      throw dup
     }
     throw error
   } finally {
@@ -330,14 +357,17 @@ export async function signInWithDetails({ name, email, phone }) {
   return { user, tenantId, created: true }
 }
 
-/** @deprecated use signInWithDetails — kept for route compatibility */
-export async function registerUser(input) {
-  return signInWithDetails(input)
+/** Join / Next flow — sign up if new, otherwise sign in with email+phone. */
+export async function signInWithDetails({ name, email, phone }) {
+  const existing = await findUserByEmail(normalizeEmail(email))
+  if (existing) {
+    return loginWithEmailPhone({ email, phone })
+  }
+  return registerUser({ name, email, phone })
 }
 
-/** @deprecated use signInWithDetails — kept for route compatibility */
 export async function authenticateUser(input) {
-  return signInWithDetails(input)
+  return loginWithEmailPhone(input)
 }
 
 /**
