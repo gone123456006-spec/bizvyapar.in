@@ -25,17 +25,23 @@ function clientIp(req) {
   return forwarded || req.ip || req.socket?.remoteAddress || ''
 }
 
-/** Never leak SQL / infra details to clients. */
+/** Never leak SQL / infra / password wording to clients. */
 function userFacingAuthError(error, fallback = 'Something went wrong. Please try again.') {
   const raw = String(error?.message || '')
   const code = error?.code
+  if (/password/i.test(raw)) {
+    return {
+      status: error?.status && error.status >= 400 ? error.status : 401,
+      message: 'Could not sign in. Use the same name, email, and mobile.',
+    }
+  }
   if (
     code === '23505' ||
     /duplicate key|unique constraint|tenants_email|users_email/i.test(raw)
   ) {
     return {
       status: 409,
-      message: 'This email is already registered. Try signing in.',
+      message: 'Could not sign in. Use the same name, email, and mobile.',
     }
   }
   if (error?.status && error.status >= 400 && error.status < 500) {

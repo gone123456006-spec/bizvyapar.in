@@ -67,13 +67,15 @@ function mapUserPayload(data) {
 function toUserAuthMessage(raw, fallback = 'Something went wrong. Please try again.') {
   const msg = String(raw || '').trim()
   if (!msg) return fallback
+  if (/password/i.test(msg)) {
+    return 'Could not sign in. Use the same name, email, and mobile.'
+  }
   if (/duplicate key|unique constraint|tenants_email|users_email|SQLSTATE|ECONN|postgres/i.test(msg)) {
-    return 'This email is already registered. Try signing in.'
+    return 'Could not sign in. Use the same name, email, and mobile.'
   }
   if (/violates|constraint|internal server|stack|at Object\./i.test(msg)) {
     return fallback
   }
-  // Keep short for production UI
   if (msg.length > 120) return fallback
   return msg
 }

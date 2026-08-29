@@ -276,7 +276,10 @@ export async function signInWithDetails({ name, email, phone }) {
 
     const phoneOk = normalizePhone(existing.phone) === cleanPhone
     const nameOk = namesMatch(existing.name, cleanName)
-    if (!phoneOk || !nameOk) {
+    // Legacy accounts may have no phone yet — attach it on first passwordless login
+    const phoneMissing = !normalizePhone(existing.phone)
+
+    if (!nameOk || (!phoneOk && !phoneMissing)) {
       const error = new Error(
         'Name or mobile does not match this email. Use the exact details from your account.',
       )
@@ -287,12 +290,14 @@ export async function signInWithDetails({ name, email, phone }) {
     const db = getPool()
     await db.query(
       `UPDATE users
-       SET failed_login_attempts = 0,
+       SET name = $2,
+           phone = COALESCE(phone, $3),
+           failed_login_attempts = 0,
            locked_until = NULL,
            last_login_at = NOW(),
            updated_at = NOW()
        WHERE id = $1`,
-      [existing.id],
+      [existing.id, cleanName, cleanPhone],
     )
     const fresh = await findUserById(existing.id)
     const tenantId = await ensureTenantForUser(fresh)

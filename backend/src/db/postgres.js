@@ -143,7 +143,7 @@ export async function initPostgres() {
     CREATE TABLE IF NOT EXISTS users (
       id UUID PRIMARY KEY,
       email TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL,
+      password_hash TEXT,
       name TEXT NOT NULL,
       phone TEXT,
       email_verified BOOLEAN NOT NULL DEFAULT FALSE,
